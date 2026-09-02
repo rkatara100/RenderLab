@@ -231,6 +231,71 @@ export async function upsertSessionComponentRollup(pool: Pool, r: RollupUpdate):
   );
 }
 
+export interface SessionSummaryRow {
+  id: string;
+  startedAt: string;
+  endedAt: string | null;
+  lastSeenAt: string;
+  url: string | null;
+  totalRenderCount: number;
+  totalWastedMs: number;
+}
+
+/** Session list for the dashboard shell (ARCHITECTURE.md §3.1) — small
+ * table, plain LIMIT/ORDER BY is fine here; the 10k+-row concern is
+ * render_events, not sessions. "Live" is derived by the caller from
+ * `endedAt`/`lastSeenAt`, not stored — see routes/sessions.ts. */
+export async function listSessions(
+  pool: Pool,
+  projectId: string,
+  limit = 50,
+): Promise<SessionSummaryRow[]> {
+  const { rows } = await pool.query<SessionSummaryRow>(
+    `SELECT id, started_at AS "startedAt", ended_at AS "endedAt", last_seen_at AS "lastSeenAt",
+            url, total_render_count AS "totalRenderCount", total_wasted_ms AS "totalWastedMs"
+     FROM sessions
+     WHERE project_id = $1
+     ORDER BY started_at DESC
+     LIMIT $2`,
+    [projectId, Math.min(limit, 200)],
+  );
+  return rows;
+}
+
+export interface ComponentSummaryRow {
+  componentId: number;
+  displayName: string;
+  fiberPath: string;
+  renderCount: number;
+  avoidableCount: number;
+  totalDurationMs: number;
+  maxDurationMs: number;
+  lastRenderAt: string;
+}
+
+/** Component tree/list for one session — reads only the pre-aggregated
+ * rollup table, never raw render_events (ARCHITECTURE.md §3.2: this is the
+ * query that lets the default view skip 10k+ raw rows entirely). */
+export async function listSessionComponents(
+  pool: Pool,
+  projectId: string,
+  sessionId: string,
+): Promise<ComponentSummaryRow[]> {
+  const { rows } = await pool.query<ComponentSummaryRow>(
+    `SELECT c.id AS "componentId", c.display_name AS "displayName", c.fiber_path AS "fiberPath",
+            r.render_count AS "renderCount", r.avoidable_count AS "avoidableCount",
+            r.total_duration_ms AS "totalDurationMs", r.max_duration_ms AS "maxDurationMs",
+            r.last_render_at AS "lastRenderAt"
+     FROM session_component_rollups r
+     JOIN components c ON c.id = r.component_id
+     JOIN sessions s ON s.id = r.session_id
+     WHERE r.session_id = $1 AND s.project_id = $2
+     ORDER BY r.render_count DESC`,
+    [sessionId, projectId],
+  );
+  return rows;
+}
+
 export async function updateSessionTotals(
   pool: Pool,
   sessionId: string,
