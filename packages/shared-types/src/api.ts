@@ -1,4 +1,4 @@
-import type { RenderReason } from './renderReason.js';
+import type { ContextDiffEntry, PropDiffEntry, RenderReason } from './renderReason.js';
 
 /**
  * Dashboard read-API view models (camelCase JSON) — distinct from the SDK's
@@ -50,4 +50,18 @@ export interface EventPageCursor {
 export interface RenderTimelinePage {
   events: RenderTimelineEvent[];
   nextCursor: EventPageCursor | null;
+}
+
+/**
+ * Phase 5's "why did this render?" drill-down for one specific event. Kept
+ * out of `RenderTimelineEvent`/`RenderTimelinePage` deliberately — the
+ * timeline lists up to hundreds of rows per page, and `propsDiff`/
+ * `contextDiff` can be non-trivial JSON payloads not worth carrying on every
+ * row of a list view a user is scanning, only on the one row they've
+ * clicked into.
+ */
+export interface RenderEventDetail extends RenderTimelineEvent {
+  reasonDetail: string | null;
+  propsDiff: PropDiffEntry[] | null;
+  contextDiff: ContextDiffEntry[] | null;
 }

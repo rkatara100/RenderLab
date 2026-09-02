@@ -25,11 +25,17 @@ describe('runMigrations', () => {
     const fake = createMigrationAwarePool();
     const applied = await runMigrations(fake as unknown as Pool);
 
-    expect(applied).toEqual(['001_init.sql']);
-    const insertCall = fake.calls.find((c) => c.text.includes('INSERT INTO schema_migrations'));
-    expect(insertCall?.params).toEqual(['001_init.sql']);
-    // the actual DDL from 001_init.sql should have been executed too
+    expect(applied).toEqual(['001_init.sql', '002_render_event_diagnostics.sql']);
+    const insertCalls = fake.calls.filter((c) => c.text.includes('INSERT INTO schema_migrations'));
+    expect(insertCalls.map((c) => c.params[0])).toEqual([
+      '001_init.sql',
+      '002_render_event_diagnostics.sql',
+    ]);
+    // the actual DDL from each file should have been executed too
     expect(fake.calls.some((c) => c.text.includes('CREATE TABLE IF NOT EXISTS projects'))).toBe(
+      true,
+    );
+    expect(fake.calls.some((c) => c.text.includes('ADD COLUMN IF NOT EXISTS reason_detail'))).toBe(
       true,
     );
   });
@@ -37,7 +43,7 @@ describe('runMigrations', () => {
   it('is idempotent: re-running against an already-migrated database applies nothing', async () => {
     const fake = createFakePool((text) => {
       if (text.startsWith('SELECT name FROM schema_migrations')) {
-        return { rows: [{ name: '001_init.sql' }] };
+        return { rows: [{ name: '001_init.sql' }, { name: '002_render_event_diagnostics.sql' }] };
       }
       return { rows: [] };
     });
@@ -46,6 +52,24 @@ describe('runMigrations', () => {
     expect(applied).toEqual([]);
     expect(fake.calls.some((c) => c.text.includes('CREATE TABLE IF NOT EXISTS projects'))).toBe(
       false,
+    );
+  });
+
+  it('applies only the migrations not yet recorded, in order', async () => {
+    const fake = createFakePool((text) => {
+      if (text.startsWith('SELECT name FROM schema_migrations')) {
+        return { rows: [{ name: '001_init.sql' }] };
+      }
+      return { rows: [] };
+    });
+
+    const applied = await runMigrations(fake as unknown as Pool);
+    expect(applied).toEqual(['002_render_event_diagnostics.sql']);
+    expect(fake.calls.some((c) => c.text.includes('CREATE TABLE IF NOT EXISTS projects'))).toBe(
+      false,
+    );
+    expect(fake.calls.some((c) => c.text.includes('ADD COLUMN IF NOT EXISTS reason_detail'))).toBe(
+      true,
     );
   });
 });

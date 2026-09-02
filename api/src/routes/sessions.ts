@@ -3,12 +3,22 @@ import type { Pool } from 'pg';
 import type {
   ComponentSummary,
   EventPageCursor,
+  RenderEventDetail,
   RenderTimelineEvent,
   SessionSummary,
 } from '@renderlab/shared-types';
 import { authenticateRequest } from '../auth/apiKey.js';
-import { listSessionComponents, listSessions, listRenderEvents } from '../db/repository.js';
+import {
+  getRenderEventDetail,
+  listRenderEvents,
+  listSessionComponents,
+  listSessions,
+} from '../db/repository.js';
 import { codeToRenderReason } from './renderReasonCodes.js';
+
+function parseJsonColumn<T>(value: string | null): T | null {
+  return value ? (JSON.parse(value) as T) : null;
+}
 
 /** A session is "live" if it hasn't been explicitly ended and was seen
  * recently — matches the Redis presence TTL window (ARCHITECTURE.md §3.3),
@@ -28,6 +38,11 @@ interface EventsQuery {
   to?: string;
   cursorTs?: string;
   cursorId?: string;
+  avoidableOnly?: string;
+}
+
+interface EventDetailQuery {
+  ts?: string;
 }
 
 export interface ReadRouteDeps {
@@ -72,7 +87,9 @@ export function registerReadRoutes(app: FastifyInstance, deps: ReadRouteDeps): v
 
   // Phase 4: paginated raw events backing the virtualized render timeline
   // (ARCHITECTURE.md §3.2/§4). Keyset cursor, never OFFSET — see
-  // repository.ts's listRenderEvents.
+  // repository.ts's listRenderEvents. `avoidableOnly` (Phase 5) drives the
+  // why-did-it-render list via the same partial index the schema already
+  // has for exactly this query.
   app.get<{ Params: { sessionId: string }; Querystring: EventsQuery }>(
     '/api/sessions/:sessionId/events',
     async (request, reply) => {
@@ -90,6 +107,7 @@ export function registerReadRoutes(app: FastifyInstance, deps: ReadRouteDeps): v
         ...(query.componentId ? { componentId: Number(query.componentId) } : {}),
         ...(query.from ? { from: query.from } : {}),
         ...(query.to ? { to: query.to } : {}),
+        ...(query.avoidableOnly === 'true' ? { avoidableOnly: true } : {}),
         ...(cursor ? { cursor } : {}),
       });
 
@@ -110,6 +128,43 @@ export function registerReadRoutes(app: FastifyInstance, deps: ReadRouteDeps): v
           : null;
 
       return reply.send({ events, nextCursor });
+    },
+  );
+
+  // Phase 5: single-event drill-down for the why-did-it-render panel.
+  // Requires `ts` as a query param — see getRenderEventDetail's doc comment
+  // for why (keeps the lookup indexed under partitioning).
+  app.get<{ Params: { sessionId: string; eventId: string }; Querystring: EventDetailQuery }>(
+    '/api/sessions/:sessionId/events/:eventId',
+    async (request, reply) => {
+      const project = await authenticateRequest(pool, request);
+      if (!project) return reply.code(401).send({ error: 'invalid or missing API key' });
+      if (!request.query.ts) {
+        return reply.code(422).send({ error: 'ts query parameter is required' });
+      }
+
+      const row = await getRenderEventDetail(
+        pool,
+        project.id,
+        request.params.sessionId,
+        request.params.eventId,
+        request.query.ts,
+      );
+      if (!row) return reply.code(404).send({ error: 'event not found' });
+
+      const detail: RenderEventDetail = {
+        id: row.id,
+        ts: row.ts,
+        durationMs: row.durationMs,
+        renderReason: codeToRenderReason(row.renderReason),
+        isAvoidable: row.isAvoidable,
+        componentId: row.componentId,
+        componentName: row.componentName,
+        reasonDetail: row.reasonDetail,
+        propsDiff: parseJsonColumn<RenderEventDetail['propsDiff']>(row.propsDiff),
+        contextDiff: parseJsonColumn<RenderEventDetail['contextDiff']>(row.contextDiff),
+      };
+      return reply.send(detail);
     },
   );
 }

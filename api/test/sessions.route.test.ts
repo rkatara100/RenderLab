@@ -1,19 +1,35 @@
 import { describe, expect, it } from 'vitest';
 import type { Pool } from 'pg';
-import type { ComponentSummary, RenderTimelinePage, SessionSummary } from '@renderlab/shared-types';
+import type {
+  ComponentSummary,
+  RenderEventDetail,
+  RenderTimelinePage,
+  SessionSummary,
+} from '@renderlab/shared-types';
 import { buildServer } from '../src/server.js';
 import { createFakeRedis } from './fakes.js';
 
 const API_KEY = 'test-project-api-key-0001';
 
 function makeFakePool(
-  overrides: { sessionRows?: unknown[]; componentRows?: unknown[]; eventRows?: unknown[] } = {},
+  overrides: {
+    sessionRows?: unknown[];
+    componentRows?: unknown[];
+    eventRows?: unknown[];
+    eventDetailRow?: unknown;
+  } = {},
 ) {
   const calls: { text: string; params: unknown[] }[] = [];
   const query = async (text: string, params: unknown[] = []) => {
     calls.push({ text, params });
     if (text.includes('FROM projects')) {
       return { rows: [{ id: 'proj-1', api_key: API_KEY, is_active: true }] };
+    }
+    // The single-event detail query is distinguished from the list query by
+    // its (session_id, ts, id) predicate — see getRenderEventDetail.
+    if (text.includes('r.ts = $2 AND r.id = $3')) {
+      const row = overrides.eventDetailRow;
+      return { rows: row === undefined ? [] : row === null ? [] : [row] };
     }
     if (text.includes('FROM render_events')) {
       return { rows: overrides.eventRows ?? [] };
@@ -203,5 +219,99 @@ describe('GET /api/sessions/:sessionId/events', () => {
     const eventsCall = pool.calls.find((c) => c.text.includes('FROM render_events'));
     expect(eventsCall?.params).toContain('2026-01-01T00:00:00.000Z');
     expect(eventsCall?.params).toContain('42');
+  });
+
+  it('forwards avoidableOnly=true to the partial-index filter', async () => {
+    const pool = makeFakePool({ eventRows: [] });
+    const app = buildServer({ pool: pool as unknown as Pool, redis: createFakeRedis() });
+
+    await app.inject({
+      method: 'GET',
+      url: '/api/sessions/s1/events?avoidableOnly=true',
+      headers: { authorization: `Bearer ${API_KEY}` },
+    });
+
+    const eventsCall = pool.calls.find((c) => c.text.includes('FROM render_events'));
+    expect(eventsCall?.text).toContain('r.is_avoidable = true');
+  });
+});
+
+describe('GET /api/sessions/:sessionId/events/:eventId', () => {
+  it('requires a valid API key', async () => {
+    const app = buildServer({ pool: makeFakePool() as unknown as Pool, redis: createFakeRedis() });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/sessions/s1/events/1?ts=2026-01-01T00:00:00.000Z',
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('requires the ts query parameter', async () => {
+    const app = buildServer({ pool: makeFakePool() as unknown as Pool, redis: createFakeRedis() });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/sessions/s1/events/1',
+      headers: { authorization: `Bearer ${API_KEY}` },
+    });
+    expect(res.statusCode).toBe(422);
+  });
+
+  it('returns 404 when the event does not exist for that session', async () => {
+    const pool = makeFakePool({ eventDetailRow: null });
+    const app = buildServer({ pool: pool as unknown as Pool, redis: createFakeRedis() });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/sessions/s1/events/999?ts=2026-01-01T00:00:00.000Z',
+      headers: { authorization: `Bearer ${API_KEY}` },
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('decodes render_reason and parses the JSON diff payloads', async () => {
+    const pool = makeFakePool({
+      eventDetailRow: {
+        id: '1',
+        ts: '2026-01-01T00:00:00.000Z',
+        durationMs: 0.8,
+        renderReason: 2,
+        isAvoidable: false,
+        componentId: 1,
+        componentName: 'SearchBox',
+        reasonDetail: 'props.value changed',
+        propsDiff: JSON.stringify([
+          {
+            key: 'value',
+            prevValue: 1,
+            nextValue: 2,
+            referenceEqual: false,
+            shallowEqual: false,
+            valueType: 'primitive',
+          },
+        ]),
+        contextDiff: null,
+      },
+    });
+    const app = buildServer({ pool: pool as unknown as Pool, redis: createFakeRedis() });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/sessions/s1/events/1?ts=2026-01-01T00:00:00.000Z',
+      headers: { authorization: `Bearer ${API_KEY}` },
+    });
+    expect(res.statusCode).toBe(200);
+    const detail = res.json<RenderEventDetail>();
+    expect(detail.renderReason).toBe('props-changed');
+    expect(detail.reasonDetail).toBe('props.value changed');
+    expect(detail.propsDiff).toEqual([
+      {
+        key: 'value',
+        prevValue: 1,
+        nextValue: 2,
+        referenceEqual: false,
+        shallowEqual: false,
+        valueType: 'primitive',
+      },
+    ]);
+    expect(detail.contextDiff).toBeNull();
   });
 });

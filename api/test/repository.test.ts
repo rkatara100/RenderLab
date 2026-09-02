@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   findProjectByApiKey,
+  getRenderEventDetail,
   insertRenderEvents,
   listRenderEvents,
   listSessionComponents,
@@ -71,7 +72,7 @@ describe('insertRenderEvents', () => {
     expect(fake.calls).toHaveLength(0);
   });
 
-  it('builds one multi-row INSERT with 8 params per row, in order', async () => {
+  it('builds one multi-row INSERT with 10 params per row, in order', async () => {
     const fake = createFakePool();
     await insertRenderEvents(fake as unknown as Pool, 'p1', [
       {
@@ -81,7 +82,9 @@ describe('insertRenderEvents', () => {
         durationMs: 0.5,
         renderReason: 1,
         isAvoidable: false,
+        reasonDetail: 'initial mount',
         propsDiff: null,
+        contextDiff: null,
       },
       {
         sessionId: 's1',
@@ -90,13 +93,15 @@ describe('insertRenderEvents', () => {
         durationMs: 1.5,
         renderReason: 5,
         isAvoidable: true,
+        reasonDetail: 'not memoized; re-rendered because an ancestor did',
         propsDiff: '[]',
+        contextDiff: null,
       },
     ]);
 
     expect(fake.calls).toHaveLength(1);
     expect(fake.calls[0]?.text).toContain(
-      'VALUES ($1, $2, $3, $4, $5, $6, $7, $8), ($9, $10, $11, $12, $13, $14, $15, $16)',
+      'VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10), ($11, $12, $13, $14, $15, $16, $17, $18, $19, $20)',
     );
     expect(fake.calls[0]?.params).toEqual([
       'p1',
@@ -106,6 +111,8 @@ describe('insertRenderEvents', () => {
       0.5,
       1,
       false,
+      'initial mount',
+      null,
       null,
       'p1',
       's1',
@@ -114,7 +121,9 @@ describe('insertRenderEvents', () => {
       1.5,
       5,
       true,
+      'not memoized; re-rendered because an ancestor did',
       '[]',
+      null,
     ]);
   });
 });
@@ -176,5 +185,42 @@ describe('listRenderEvents', () => {
     expect(text).toContain('r.ts >= $2');
     expect(text).toContain('r.ts < $3');
     expect(params).toEqual(['s1', '2026-01-01T00:00:00.000Z', '2026-01-02T00:00:00.000Z']);
+  });
+
+  it('filters to avoidable-only renders via the partial index condition', async () => {
+    const fake = createFakePool();
+    await listRenderEvents(fake as unknown as Pool, { sessionId: 's1', avoidableOnly: true });
+    expect(fake.calls[0]?.text).toContain('r.is_avoidable = true');
+  });
+});
+
+describe('getRenderEventDetail', () => {
+  it('looks up by (session_id, ts, id) — not id alone — to stay indexed under partitioning', async () => {
+    const fake = createFakePool(() => ({
+      rows: [{ id: '1', reasonDetail: 'props.value changed' }],
+    }));
+    const detail = await getRenderEventDetail(
+      fake as unknown as Pool,
+      'p1',
+      's1',
+      '1',
+      '2026-01-01T00:00:00.000Z',
+    );
+
+    expect(fake.calls[0]?.text).toContain('r.session_id = $1 AND r.ts = $2 AND r.id = $3');
+    expect(fake.calls[0]?.params).toEqual(['s1', '2026-01-01T00:00:00.000Z', '1', 'p1']);
+    expect(detail?.reasonDetail).toBe('props.value changed');
+  });
+
+  it('returns null when no row matches', async () => {
+    const fake = createFakePool();
+    const detail = await getRenderEventDetail(
+      fake as unknown as Pool,
+      'p1',
+      's1',
+      '404',
+      '2026-01-01T00:00:00.000Z',
+    );
+    expect(detail).toBeNull();
   });
 });

@@ -10,12 +10,13 @@ import { ErrorState } from '../../../components/shared/ErrorState';
 import { EmptyState } from '../../../components/shared/EmptyState';
 import { SessionPicker } from '../../../components/shared/SessionPicker';
 import { Timeline } from '../../../components/timeline/Timeline';
+import { WhyDidItRenderPanel } from '../../../components/why-did-it-render/WhyDidItRenderPanel';
 
 export default function TimelinePage(): React.JSX.Element {
   const sessionsQuery = useSessionsWithDefaultSelection();
   const selectedSessionId = useSessionSelectionStore((state) => state.selectedSessionId);
   const selectSession = useSessionSelectionStore((state) => state.selectSession);
-  const selectedEventId = useTimelineStore((state) => state.selectedEventId);
+  const selectedEvent = useTimelineStore((state) => state.selectedEvent);
   const selectEvent = useTimelineStore((state) => state.selectEvent);
 
   const eventsQuery = useSessionEvents(selectedSessionId);
@@ -67,14 +68,17 @@ export default function TimelinePage(): React.JSX.Element {
             />
           ) : null}
           {eventsQuery.isSuccess && events.length > 0 ? (
-            <Timeline
-              events={events}
-              hasNextPage={eventsQuery.hasNextPage}
-              isFetchingNextPage={eventsQuery.isFetchingNextPage}
-              onLoadMore={() => void eventsQuery.fetchNextPage()}
-              selectedEventId={selectedEventId}
-              onSelect={selectEvent}
-            />
+            <div className="timeline-layout">
+              <Timeline
+                events={events}
+                hasNextPage={eventsQuery.hasNextPage}
+                isFetchingNextPage={eventsQuery.isFetchingNextPage}
+                onLoadMore={() => void eventsQuery.fetchNextPage()}
+                selectedEventId={selectedEvent?.id ?? null}
+                onSelect={(event) => selectEvent({ id: event.id, ts: event.ts })}
+              />
+              <WhyDidItRenderPanel sessionId={selectedSessionId} event={selectedEvent} />
+            </div>
           ) : null}
         </>
       ) : null}

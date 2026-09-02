@@ -94,6 +94,56 @@ describe('POST /api/ingest/events', () => {
     expect(insertCall?.params).toEqual(expect.arrayContaining([1, 5, true]));
   });
 
+  it('persists reasonDetail and propsDiff for a props-changed render, not just avoidable ones', async () => {
+    const fakePool = makeFakePool();
+    const app = buildServer({ pool: fakePool as unknown as Pool, redis: createFakeRedis() });
+    const propsDiff = [
+      {
+        key: 'value',
+        prevValue: 1,
+        nextValue: 2,
+        referenceEqual: false,
+        shallowEqual: false,
+        valueType: 'primitive' as const,
+      },
+    ];
+
+    await app.inject({
+      method: 'POST',
+      url: '/api/ingest/events',
+      headers: { authorization: `Bearer ${API_KEY}` },
+      payload: makeBatchBody([
+        makeRenderEvent({
+          renderReason: 'props-changed',
+          phase: 'update',
+          reasonDetail: 'props.value changed',
+          propsDiff,
+        }),
+      ]),
+    });
+
+    const insertCall = fakePool.calls.find((c) => c.text.includes('INSERT INTO render_events'));
+    expect(insertCall?.params).toContain('props.value changed');
+    expect(insertCall?.params).toContain(JSON.stringify(propsDiff));
+  });
+
+  it('does not persist propsDiff for renders where it has no diagnostic value (state-changed)', async () => {
+    const fakePool = makeFakePool();
+    const app = buildServer({ pool: fakePool as unknown as Pool, redis: createFakeRedis() });
+
+    await app.inject({
+      method: 'POST',
+      url: '/api/ingest/events',
+      headers: { authorization: `Bearer ${API_KEY}` },
+      payload: makeBatchBody([makeRenderEvent({ renderReason: 'state-changed', phase: 'update' })]),
+    });
+
+    const insertCall = fakePool.calls.find((c) => c.text.includes('INSERT INTO render_events'));
+    // propsDiff and contextDiff params should both be null for this row
+    const nullCount = insertCall?.params.filter((p) => p === null).length ?? 0;
+    expect(nullCount).toBeGreaterThanOrEqual(2);
+  });
+
   it('is idempotent: replaying the same batch_id does not insert render events twice', async () => {
     const fakePool = makeFakePool();
     const redis = createFakeRedis();

@@ -10,7 +10,7 @@ export interface TimelineProps {
   isFetchingNextPage: boolean;
   onLoadMore: () => void;
   selectedEventId: string | null;
-  onSelect: (eventId: string) => void;
+  onSelect: (event: RenderTimelineEvent) => void;
 }
 
 const ROW_HEIGHT_PX = 32;
@@ -88,8 +88,15 @@ export function Timeline({
               key={event.id}
               className={event.id === selectedEventId ? 'timeline-row is-selected' : 'timeline-row'}
               style={{ height: virtualRow.size, transform: `translateY(${virtualRow.start}px)` }}
-              onClick={() => onSelect(event.id)}
+              onClick={() => onSelect(event)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onSelect(event);
+                }
+              }}
               role="row"
+              tabIndex={0}
               aria-selected={event.id === selectedEventId}
             >
               <span className="timeline-row__time">{new Date(event.ts).toLocaleTimeString()}</span>
