@@ -9,13 +9,17 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint . --max-warnings 0",
     "test": "vitest run",
-    "dev": "tsx watch src/index.ts"
+    "dev": "tsx watch src/index.ts",
+    "db:migrate": "tsx src/db/runMigrate.ts"
   },
   "dependencies": {
     "@renderlab/shared-types": "workspace:*",
-    "fastify": "^5.12.1"
+    "@upstash/redis": "^1.38.3",
+    "fastify": "^5.12.1",
+    "pg": "^8.23.0"
   },
   "devDependencies": {
+    "@types/pg": "^8.23.1",
     "tsx": "^4.23.13",
     "vitest": "^4.1.11"
   }

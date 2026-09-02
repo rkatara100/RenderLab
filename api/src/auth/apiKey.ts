@@ -1,0 +1,19 @@
+import type { FastifyRequest } from 'fastify';
+import type { Pool } from 'pg';
+import { findProjectByApiKey, type Project } from '../db/repository.js';
+
+/** API key -> project resolution (ARCHITECTURE.md §3.4). The client never
+ * supplies `project_id` directly — it's always resolved server-side from the
+ * key, closing the tenant-spoofing hole. */
+export async function authenticateRequest(
+  pool: Pool,
+  request: FastifyRequest,
+): Promise<Project | null> {
+  const header = request.headers.authorization;
+  if (!header?.startsWith('Bearer ')) return null;
+  const apiKey = header.slice('Bearer '.length).trim();
+  if (!apiKey) return null;
+
+  const project = await findProjectByApiKey(pool, apiKey);
+  return project?.isActive ? project : null;
+}

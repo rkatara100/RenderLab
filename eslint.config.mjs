@@ -81,6 +81,15 @@ export default tseslint.config(
       ...nextPlugin.configs.recommended.rules,
     },
   },
+  // Test doubles legitimately implement an async interface (pg Pool, the
+  // Upstash Redis client) with synchronous in-memory logic — no real I/O to
+  // await, but the shape must still return a Promise.
+  {
+    files: ['**/test/**/*.{ts,tsx}'],
+    rules: {
+      '@typescript-eslint/require-await': 'off',
+    },
+  },
   // Prettier disables stylistic rules — formatting is a separate Turborepo task, not the linter's job
   eslintConfigPrettier,
 );
