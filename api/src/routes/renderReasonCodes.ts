@@ -39,3 +39,19 @@ export function codeToRenderReason(code: number): RenderReason {
 export function isAvoidableRender(reason: RenderReason): boolean {
   return reason === 'parent-rerender';
 }
+
+/**
+ * Which renders are worth paying JSONB storage for on every row
+ * (ARCHITECTURE.md §3.1: "only populated when avoidable or sampled", not
+ * unconditionally). `props-changed` is the single most common diagnostic
+ * case — without it, Phase 5's why-did-it-render panel would have nothing
+ * to show for the most frequent reason a component re-renders.
+ * `parent-rerender` (avoidable) was already covered.
+ */
+export function shouldPersistPropsDiff(reason: RenderReason): boolean {
+  return reason === 'props-changed' || isAvoidableRender(reason);
+}
+
+export function shouldPersistContextDiff(reason: RenderReason): boolean {
+  return reason === 'context-changed';
+}

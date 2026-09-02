@@ -16,7 +16,12 @@ import {
   type HotPathEvent,
   type RedisLike,
 } from '../redis/hotPath.js';
-import { isAvoidableRender, renderReasonToCode } from './renderReasonCodes.js';
+import {
+  isAvoidableRender,
+  renderReasonToCode,
+  shouldPersistContextDiff,
+  shouldPersistPropsDiff,
+} from './renderReasonCodes.js';
 
 /** Hard server-side cap regardless of SDK behavior (ARCHITECTURE.md §3.4) —
  * the SDK's own default batches at 250/2s; this defends against a
@@ -105,7 +110,14 @@ export function registerIngestRoutes(app: FastifyInstance, deps: IngestRouteDeps
         durationMs: event.actualDuration,
         renderReason: renderReasonToCode(event.renderReason),
         isAvoidable,
-        propsDiff: isAvoidable ? JSON.stringify(event.propsDiff) : null,
+        reasonDetail: event.reasonDetail ?? null,
+        propsDiff: shouldPersistPropsDiff(event.renderReason)
+          ? JSON.stringify(event.propsDiff)
+          : null,
+        contextDiff:
+          shouldPersistContextDiff(event.renderReason) && event.contextDiff
+            ? JSON.stringify(event.contextDiff)
+            : null,
       });
       hotPathBatch.push({ componentId, durationMs: event.actualDuration, isAvoidable });
     }

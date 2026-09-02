@@ -97,8 +97,23 @@ export interface RenderEventRow {
   durationMs: number;
   renderReason: number;
   isAvoidable: boolean;
+  reasonDetail: string | null;
   propsDiff: string | null;
+  contextDiff: string | null;
 }
+
+const RENDER_EVENT_COLUMNS = [
+  'project_id',
+  'session_id',
+  'component_id',
+  'ts',
+  'duration_ms',
+  'render_reason',
+  'is_avoidable',
+  'reason_detail',
+  'props_diff',
+  'context_diff',
+];
 
 /** Single multi-row INSERT per batch — the SDK batches up to 250 events
  * (ARCHITECTURE.md §3.4), so this is one round-trip per flush, not one per
@@ -111,13 +126,16 @@ export async function insertRenderEvents(
 ): Promise<void> {
   if (rows.length === 0) return;
 
+  const columnsPerRow = RENDER_EVENT_COLUMNS.length;
   const values: unknown[] = [];
   const tuples: string[] = [];
   rows.forEach((row, index) => {
-    const base = index * 8;
-    tuples.push(
-      `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8})`,
+    const base = index * columnsPerRow;
+    const placeholders = Array.from(
+      { length: columnsPerRow },
+      (_, offset) => `$${base + offset + 1}`,
     );
+    tuples.push(`(${placeholders.join(', ')})`);
     values.push(
       projectId,
       row.sessionId,
@@ -126,12 +144,14 @@ export async function insertRenderEvents(
       row.durationMs,
       row.renderReason,
       row.isAvoidable,
+      row.reasonDetail,
       row.propsDiff,
+      row.contextDiff,
     );
   });
 
   await pool.query(
-    `INSERT INTO render_events (project_id, session_id, component_id, ts, duration_ms, render_reason, is_avoidable, props_diff)
+    `INSERT INTO render_events (${RENDER_EVENT_COLUMNS.join(', ')})
      VALUES ${tuples.join(', ')}`,
     values,
   );
@@ -159,6 +179,10 @@ export interface ListRenderEventsParams {
   limit?: number;
   from?: string;
   to?: string;
+  /** Uses `idx_render_events_avoidable` (ARCHITECTURE.md §3.2 point 4) — the
+   * "show me only wasted renders" query the partial index exists for.
+   * Powers Phase 5's why-did-it-render list. */
+  avoidableOnly?: boolean;
 }
 
 /** Keyset pagination on (ts, id) — never OFFSET (ARCHITECTURE.md §3.2): cost
@@ -186,6 +210,9 @@ export async function listRenderEvents(
     values.push(params.to);
     conditions.push(`r.ts < $${values.length}`);
   }
+  if (params.avoidableOnly) {
+    conditions.push('r.is_avoidable = true');
+  }
   if (params.cursor) {
     values.push(params.cursor.ts, params.cursor.id);
     conditions.push(`(r.ts, r.id) < ($${values.length - 1}, $${values.length})`);
@@ -202,6 +229,48 @@ export async function listRenderEvents(
     values,
   );
   return rows;
+}
+
+export interface RenderEventDetailRow {
+  id: string;
+  ts: string;
+  durationMs: number;
+  renderReason: number;
+  isAvoidable: boolean;
+  componentId: number;
+  componentName: string;
+  reasonDetail: string | null;
+  propsDiff: string | null;
+  contextDiff: string | null;
+}
+
+/**
+ * Phase 5's single-event drill-down. Requires `ts` (not just `eventId`) as
+ * a deliberate API choice: `render_events` is range-partitioned and its
+ * only index touching `session_id` is `(session_id, ts)`
+ * (idx_render_events_session_ts) — looking up by `id` alone would force a
+ * scan across every partition. The dashboard already has `ts` from the
+ * timeline row the user clicked, so passing it through costs nothing and
+ * keeps this lookup indexed, same philosophy as the keyset cursor.
+ */
+export async function getRenderEventDetail(
+  pool: Pool,
+  projectId: string,
+  sessionId: string,
+  eventId: string,
+  ts: string,
+): Promise<RenderEventDetailRow | null> {
+  const { rows } = await pool.query<RenderEventDetailRow>(
+    `SELECT r.id, r.ts, r.duration_ms AS "durationMs", r.render_reason AS "renderReason",
+            r.is_avoidable AS "isAvoidable", r.component_id AS "componentId", c.display_name AS "componentName",
+            r.reason_detail AS "reasonDetail", r.props_diff AS "propsDiff", r.context_diff AS "contextDiff"
+     FROM render_events r
+     JOIN components c ON c.id = r.component_id
+     JOIN sessions s ON s.id = r.session_id
+     WHERE r.session_id = $1 AND r.ts = $2 AND r.id = $3 AND s.project_id = $4`,
+    [sessionId, ts, eventId, projectId],
+  );
+  return rows[0] ?? null;
 }
 
 export interface RollupUpdate {
