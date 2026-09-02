@@ -1,0 +1,7 @@
+packages:
+  - 'sdk'
+  - 'dashboard'
+  - 'api'
+  - 'packages/*'
+allowBuilds:
+  esbuild: true
