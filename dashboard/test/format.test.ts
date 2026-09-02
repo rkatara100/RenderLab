@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatDurationMs } from '../src/lib/format.js';
+import { formatDurationMs } from '../src/lib/format';
 
 describe('formatDurationMs', () => {
   it('formats sub-millisecond durations as microseconds', () => {

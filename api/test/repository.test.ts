@@ -3,6 +3,8 @@ import {
   findProjectByApiKey,
   insertRenderEvents,
   listRenderEvents,
+  listSessionComponents,
+  listSessions,
   upsertComponent,
   upsertSession,
 } from '../src/db/repository.js';
@@ -114,6 +116,28 @@ describe('insertRenderEvents', () => {
       true,
       '[]',
     ]);
+  });
+});
+
+describe('listSessions', () => {
+  it('orders by started_at DESC and caps the limit at 200', async () => {
+    const fake = createFakePool();
+    await listSessions(fake as unknown as Pool, 'p1', 10_000);
+    const { text, params } = fake.calls[0]!;
+    expect(text).toContain('ORDER BY started_at DESC');
+    expect(params).toEqual(['p1', 200]);
+  });
+});
+
+describe('listSessionComponents', () => {
+  it('joins rollups to components and scopes by both session and project', async () => {
+    const fake = createFakePool();
+    await listSessionComponents(fake as unknown as Pool, 'p1', 's1');
+    const { text, params } = fake.calls[0]!;
+    expect(text).toContain('FROM session_component_rollups');
+    expect(text).toContain('JOIN sessions s ON s.id = r.session_id');
+    expect(text).toContain('ORDER BY r.render_count DESC');
+    expect(params).toEqual(['s1', 'p1']);
   });
 });
 
