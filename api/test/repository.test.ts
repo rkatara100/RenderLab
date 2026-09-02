@@ -152,9 +152,10 @@ describe('listRenderEvents', () => {
 
     const { text, params } = fake.calls[0]!;
     expect(text).not.toContain('OFFSET');
-    expect(text).toContain('(ts, id) < ($2, $3)');
-    expect(text).toContain('ORDER BY ts DESC, id DESC');
+    expect(text).toContain('(r.ts, r.id) < ($2, $3)');
+    expect(text).toContain('ORDER BY r.ts DESC, r.id DESC');
     expect(text).toContain('LIMIT 50');
+    expect(text).toContain('JOIN components c ON c.id = r.component_id');
     expect(params).toEqual(['s1', '2026-01-01T00:00:00.000Z', '100']);
   });
 
@@ -172,8 +173,8 @@ describe('listRenderEvents', () => {
       to: '2026-01-02T00:00:00.000Z',
     });
     const { text, params } = fake.calls[0]!;
-    expect(text).toContain('ts >= $2');
-    expect(text).toContain('ts < $3');
+    expect(text).toContain('r.ts >= $2');
+    expect(text).toContain('r.ts < $3');
     expect(params).toEqual(['s1', '2026-01-01T00:00:00.000Z', '2026-01-02T00:00:00.000Z']);
   });
 });
