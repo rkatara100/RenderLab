@@ -15,6 +15,19 @@ export function renderReasonToCode(reason: RenderReason): number {
   return CODES[reason];
 }
 
+const REASONS_BY_CODE: Record<number, RenderReason> = Object.fromEntries(
+  Object.entries(CODES).map(([reason, code]) => [code, reason as RenderReason]),
+);
+
+/** Read-side inverse of `renderReasonToCode`, used when serving raw events
+ * back to the dashboard (Phase 4 timeline, Phase 5 why-did-it-render) —
+ * callers should never need to know about the numeric encoding. */
+export function codeToRenderReason(code: number): RenderReason {
+  const reason = REASONS_BY_CODE[code];
+  if (!reason) throw new Error(`renderReasonCodes: unknown render_reason code ${code}`);
+  return reason;
+}
+
 /**
  * A render counts as "avoidable" — the definition behind
  * `is_avoidable`/`avoidable_count`/`total_wasted_ms` — when it fired purely

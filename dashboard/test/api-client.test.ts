@@ -49,13 +49,11 @@ describe('apiFetch', () => {
   it('returns the parsed JSON body on success', async () => {
     vi.stubGlobal(
       'fetch',
-      vi
-        .fn()
-        .mockResolvedValue({
-          ok: true,
-          status: 200,
-          json: () => Promise.resolve({ sessions: [] }),
-        }),
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ sessions: [] }),
+      }),
     );
     await expect(apiFetch('/api/sessions')).resolves.toEqual({ sessions: [] });
   });

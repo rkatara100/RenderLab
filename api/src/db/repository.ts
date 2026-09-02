@@ -16,7 +16,7 @@ export async function findProjectByApiKey(pool: Pool, apiKey: string): Promise<P
     'SELECT id, api_key, is_active FROM projects WHERE api_key_prefix = $1',
     [prefix],
   );
-  const match = rows.find((r) => r.api_key === apiKey);
+  const match = rows.find((candidate) => candidate.api_key === apiKey);
   return match ? { id: match.id, isActive: match.is_active } : null;
 }
 
@@ -113,20 +113,20 @@ export async function insertRenderEvents(
 
   const values: unknown[] = [];
   const tuples: string[] = [];
-  rows.forEach((r, i) => {
-    const base = i * 8;
+  rows.forEach((row, index) => {
+    const base = index * 8;
     tuples.push(
       `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8})`,
     );
     values.push(
       projectId,
-      r.sessionId,
-      r.componentId,
-      r.ts,
-      r.durationMs,
-      r.renderReason,
-      r.isAvoidable,
-      r.propsDiff,
+      row.sessionId,
+      row.componentId,
+      row.ts,
+      row.durationMs,
+      row.renderReason,
+      row.isAvoidable,
+      row.propsDiff,
     );
   });
 
@@ -143,6 +143,8 @@ export interface RenderEventPageRow {
   durationMs: number;
   renderReason: number;
   isAvoidable: boolean;
+  componentId: number;
+  componentName: string;
 }
 
 export interface PageCursor {
@@ -161,37 +163,41 @@ export interface ListRenderEventsParams {
 
 /** Keyset pagination on (ts, id) — never OFFSET (ARCHITECTURE.md §3.2): cost
  * is O(page size) at any depth via the existing (session_id, ts) index,
- * unlike OFFSET which degrades linearly with page depth. */
+ * unlike OFFSET which degrades linearly with page depth. Joins `components`
+ * for display name — cheap at a capped page size (<=500 rows) via the
+ * primary key, and saves the Phase 4 timeline a second round-trip. */
 export async function listRenderEvents(
   pool: Pool,
   params: ListRenderEventsParams,
 ): Promise<RenderEventPageRow[]> {
   const limit = Math.min(params.limit ?? 100, 500);
-  const conditions = ['session_id = $1'];
+  const conditions = ['r.session_id = $1'];
   const values: unknown[] = [params.sessionId];
 
   if (params.componentId !== undefined) {
     values.push(params.componentId);
-    conditions.push(`component_id = $${values.length}`);
+    conditions.push(`r.component_id = $${values.length}`);
   }
   if (params.from) {
     values.push(params.from);
-    conditions.push(`ts >= $${values.length}`);
+    conditions.push(`r.ts >= $${values.length}`);
   }
   if (params.to) {
     values.push(params.to);
-    conditions.push(`ts < $${values.length}`);
+    conditions.push(`r.ts < $${values.length}`);
   }
   if (params.cursor) {
     values.push(params.cursor.ts, params.cursor.id);
-    conditions.push(`(ts, id) < ($${values.length - 1}, $${values.length})`);
+    conditions.push(`(r.ts, r.id) < ($${values.length - 1}, $${values.length})`);
   }
 
   const { rows } = await pool.query<RenderEventPageRow>(
-    `SELECT id, ts, duration_ms AS "durationMs", render_reason AS "renderReason", is_avoidable AS "isAvoidable"
-     FROM render_events
+    `SELECT r.id, r.ts, r.duration_ms AS "durationMs", r.render_reason AS "renderReason",
+            r.is_avoidable AS "isAvoidable", r.component_id AS "componentId", c.display_name AS "componentName"
+     FROM render_events r
+     JOIN components c ON c.id = r.component_id
      WHERE ${conditions.join(' AND ')}
-     ORDER BY ts DESC, id DESC
+     ORDER BY r.ts DESC, r.id DESC
      LIMIT ${limit}`,
     values,
   );
@@ -211,7 +217,10 @@ export interface RollupUpdate {
  * the increment since the last flush, not a running total, so `+ EXCLUDED.*`
  * is correct here (not a plain overwrite). `max_duration_ms` isn't updated
  * here — see flushJob.ts for why it isn't hot-tracked in Phase 2. */
-export async function upsertSessionComponentRollup(pool: Pool, r: RollupUpdate): Promise<void> {
+export async function upsertSessionComponentRollup(
+  pool: Pool,
+  rollup: RollupUpdate,
+): Promise<void> {
   await pool.query(
     `INSERT INTO session_component_rollups (session_id, component_id, render_count, avoidable_count, total_duration_ms, max_duration_ms, last_render_at)
      VALUES ($1, $2, $3, $4, $5, 0, $6)
@@ -221,12 +230,12 @@ export async function upsertSessionComponentRollup(pool: Pool, r: RollupUpdate):
        total_duration_ms = session_component_rollups.total_duration_ms + EXCLUDED.total_duration_ms,
        last_render_at = GREATEST(session_component_rollups.last_render_at, EXCLUDED.last_render_at)`,
     [
-      r.sessionId,
-      r.componentId,
-      r.renderCount,
-      r.avoidableCount,
-      r.totalDurationMs,
-      r.lastRenderAt,
+      rollup.sessionId,
+      rollup.componentId,
+      rollup.renderCount,
+      rollup.avoidableCount,
+      rollup.totalDurationMs,
+      rollup.lastRenderAt,
     ],
   );
 }
