@@ -1,0 +1,22 @@
+{
+  "name": "@renderlab/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint . --max-warnings 0",
+    "test": "vitest run",
+    "dev": "tsx watch src/index.ts"
+  },
+  "dependencies": {
+    "@renderlab/shared-types": "workspace:*",
+    "fastify": "^5.12.1"
+  },
+  "devDependencies": {
+    "tsx": "^4.23.13",
+    "vitest": "^4.1.11"
+  }
+}
