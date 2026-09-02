@@ -40,11 +40,36 @@ export default tseslint.config(
       },
     },
   },
+  // Anywhere React hooks are authored — the SDK defines its own hooks, not just the dashboard.
+  {
+    files: ['sdk/**/*.{ts,tsx}', 'dashboard/**/*.{ts,tsx}'],
+    plugins: {
+      'react-hooks': reactHooks,
+    },
+    rules: {
+      ...reactHooks.configs.recommended.rules,
+    },
+  },
+  // sdk/src/instrumentation is a deliberate, narrow exception to the
+  // react-hooks/refs and react-hooks/purity rules (introduced for React
+  // Compiler auto-memoization safety): this is an observational
+  // instrumentation library whose entire mechanic is reading/writing refs
+  // synchronously during render to diff the current render against the
+  // previous one, and timing render duration via performance.now(). None of
+  // this affects JSX output — only what gets reported to telemetry — so it
+  // is safe even under compiler-driven memoization. See ARCHITECTURE.md §8
+  // and the Phase 1 plan for the full rationale.
+  {
+    files: ['sdk/src/instrumentation/**/*.{ts,tsx}'],
+    rules: {
+      'react-hooks/refs': 'off',
+      'react-hooks/purity': 'off',
+    },
+  },
   // Browser-oriented dashboard app
   {
     files: ['dashboard/**/*.{ts,tsx}'],
     plugins: {
-      'react-hooks': reactHooks,
       '@next/next': nextPlugin,
     },
     languageOptions: {
@@ -53,7 +78,6 @@ export default tseslint.config(
       },
     },
     rules: {
-      ...reactHooks.configs.recommended.rules,
       ...nextPlugin.configs.recommended.rules,
     },
   },
