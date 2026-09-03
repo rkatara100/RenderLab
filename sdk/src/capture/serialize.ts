@@ -34,12 +34,6 @@ function redactPropsDiff(diffs: PropDiffEntry[], config: ResolvedConfig): PropDi
   }));
 }
 
-/**
- * Applies `capturePropValues`/`maxPropDepth`/`maxPropStringLength`/`ignore.propKeys`
- * just before a batch is sent — kept out of the hot capture path (diffing
- * still sees full values in-memory for correctness) so redaction is a pure
- * function of config, easy to unit test in isolation.
- */
 export function serializeEvent(event: TelemetryEvent, config: ResolvedConfig): TelemetryEvent {
   if (event.type !== 'render') return event;
   return { ...event, propsDiff: redactPropsDiff(event.propsDiff, config) };

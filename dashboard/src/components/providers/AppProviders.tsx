@@ -26,9 +26,6 @@ function ThemeSync(): null {
   return null;
 }
 
-/** Root client-side provider tree: one QueryClient per tab (not a module
- * singleton — see queryClient.ts), plus the theme/online-status side effects
- * that need to run once at the app root regardless of which route is active. */
 export function AppProviders({ children }: { children: ReactNode }): React.JSX.Element {
   const [queryClient] = useState(createQueryClient);
 

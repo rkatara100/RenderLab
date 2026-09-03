@@ -40,16 +40,6 @@ interface PendingRender {
   commitKey: number;
 }
 
-/**
- * Resolving the "parent-rerender" rule needs to know every component that
- * rendered in the *same commit* — but React fires nested `Profiler.onRender`
- * (and `useLayoutEffect`) bottom-up, children before parents. By the time a
- * child's callback runs, its parent's hasn't fired yet, so a naive
- * "mark-then-check" would miss real parent-rerenders. Instead, every render
- * in a commit is buffered here and resolved together in a `queueMicrotask`
- * scheduled once per commit — by microtask time, every synchronous
- * `onRender`/layout-effect call for that commit has already run, in any order.
- */
 const pendingByCommit = new Map<number, PendingRender[]>();
 
 function finalizeCommit(commitKey: number): void {
@@ -114,24 +104,12 @@ function schedulePendingRender(record: PendingRender): void {
 export interface RenderCaptureHandle {
   componentId: string;
   componentPath: string[];
-  /** Plug directly into `<Profiler onRender={onRender}>` (HOC path). */
+
   onRender: ProfilerOnRenderCallback;
-  /**
-   * Call from a `useLayoutEffect` when not wrapping in `<Profiler>` (hook
-   * path). Pass `commitKey` (e.g. from `commitEpoch.ts`) since `timing.commitTime`
-   * alone can't be trusted to match across sibling components on this path —
-   * see commitEpoch.ts for why.
-   */
+
   finalize: (timing: RenderTiming, commitKey?: number) => void;
 }
 
-/**
- * The shared engine behind `withRenderLabProfiler` and `useRenderLabProfiler`:
- * assigns a stable componentId/path, diffs props every render, and exposes
- * `finalize` to schedule the RenderEvent once timing is known. Timing is
- * supplied differently by each caller — see ARCHITECTURE.md §8.1 / Phase 1
- * plan for why the HOC gets real Profiler data and the hook variant doesn't.
- */
 export function useRenderCapture(
   componentName: string,
   props: Record<string, unknown>,

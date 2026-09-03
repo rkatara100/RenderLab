@@ -11,14 +11,6 @@ interface SettingsActions {
   setApiKey: (key: string) => void;
 }
 
-/**
- * There's no human login system yet (ARCHITECTURE.md §3.5/§8) — the
- * dashboard authenticates to the ingestion/read API with the same
- * project-scoped API key the SDK uses. Until a real multi-user auth layer
- * exists, the Settings page is where a developer pastes their project's key,
- * persisted to this browser's localStorage only (never sent anywhere but
- * the configured API).
- */
 export const useSettingsStore = create<SettingsState & SettingsActions>()(
   persist(
     (set) => ({

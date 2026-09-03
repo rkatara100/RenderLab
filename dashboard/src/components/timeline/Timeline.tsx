@@ -14,33 +14,9 @@ export interface TimelineProps {
 }
 
 const ROW_HEIGHT_PX = 32;
-/** Fetch the next page once the visible window comes within this many rows
- * of the end of what's loaded — keeps scrolling smooth by prefetching
- * ahead of the user reaching the bottom, without loading a whole 10k+-event
- * session up front. */
+
 const PREFETCH_ROW_THRESHOLD = 20;
 
-/**
- * Virtualization approach: `@tanstack/react-virtual` (windowing), not a
- * custom implementation. It's a small (~a few KB), headless, actively
- * maintained library already in the same family as React Query (already a
- * dependency), and windowing — computing which rows are visible from scroll
- * offset + a fixed row height, rendering only those into the DOM — is a
- * solved problem; hand-rolling scroll math (and its edge cases: fast
- * scrolling, resize, momentum scrolling on trackpads) isn't warranted here.
- *
- * Why this scales to 10k+ events without jank: DOM node count is bounded by
- * the *viewport*, not the *dataset*. With a fixed `ROW_HEIGHT_PX` and no
- * dynamic per-row measurement, `getVirtualItems()` is an O(1) range query
- * (binary search over a size lookup, not a scan) — rendering 10 or 10,000
- * loaded events costs the same DOM work: viewport height ÷ row height rows,
- * plus a small overscan. This is proven, not just claimed: see
- * `test/Timeline.perf.test.tsx`, which renders a 10,000-event timeline and
- * asserts the actual DOM row count stays in the low dozens regardless.
- * Data volume itself is separately bounded by keyset-cursor pagination
- * (useSessionEvents.ts) — the client never holds more in memory than the
- * user has actually scrolled through.
- */
 export function Timeline({
   events,
   hasNextPage,
@@ -51,19 +27,12 @@ export function Timeline({
 }: TimelineProps): React.JSX.Element {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
-  // @tanstack/react-virtual returns getVirtualItems()/getTotalSize() functions the React
-  // Compiler can't safely auto-memoize; this project doesn't use the React Compiler, so
-  // it's inert here, and there's no alternative API from the library to avoid it.
-  // eslint-disable-next-line react-hooks/incompatible-library -- see comment above
+  // eslint-disable-next-line react-hooks/incompatible-library
   const rowVirtualizer = useVirtualizer({
     count: events.length,
     getScrollElement: () => scrollContainerRef.current,
     estimateSize: () => ROW_HEIGHT_PX,
     overscan: 10,
-    // Only matters before the first real ResizeObserver measurement lands
-    // (a brief instant in real browsers); in a non-browser test environment
-    // with no layout engine it's the only measurement that ever lands,
-    // which is exactly what test/Timeline.perf.test.tsx relies on.
     initialRect: { width: 800, height: 520 },
   });
 

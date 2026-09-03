@@ -11,8 +11,6 @@ export interface FakePool {
   connect: () => Promise<{ query: FakePool['query']; release: () => void }>;
 }
 
-/** A pg `Pool`-shaped fake: records every query and lets each test decide
- * what comes back via `handler`, without spinning up real Postgres. */
 export function createFakePool(
   handler: (text: string, params: unknown[]) => { rows: unknown[] } = () => ({ rows: [] }),
 ): FakePool {
@@ -24,7 +22,6 @@ export function createFakePool(
   return { calls, query, connect: () => Promise.resolve({ query, release: () => {} }) };
 }
 
-/** An in-memory `RedisLike` fake — real hash/counter semantics, no network. */
 export function createFakeRedis(): RedisLike & { store: Map<string, unknown> } {
   const store = new Map<string, unknown>();
   const hashes = new Map<string, Map<string, number>>();

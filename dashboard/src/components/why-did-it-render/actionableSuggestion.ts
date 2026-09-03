@@ -1,11 +1,5 @@
 import type { RenderReason } from '@renderlab/shared-types';
 
-/**
- * The "act on it" half of Phase 5's brief — each rule from the SDK's
- * heuristic (sdk/src/instrumentation/renderReason.ts) gets a concrete next
- * step, not just a label. `reasonDetail` (from the SDK) already names *what*
- * changed; this adds *what to do about it*.
- */
 export function getActionableSuggestion(reason: RenderReason, componentName: string): string {
   switch (reason) {
     case 'mount':

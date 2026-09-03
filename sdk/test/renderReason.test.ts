@@ -7,7 +7,7 @@ import { diffProps } from '../src/instrumentation/propsDiff.js';
 
 const base: RenderReasonInput = {
   phase: 'update',
-  propsDiff: diffProps({ a: 1 }, { a: 1 }), // no change
+  propsDiff: diffProps({ a: 1 }, { a: 1 }),
   contextDiff: [],
   stateChanged: null,
   isMemoized: false,

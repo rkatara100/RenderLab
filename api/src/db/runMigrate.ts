@@ -2,9 +2,6 @@ import { getPool, closePool } from './pool.js';
 import { runMigrations } from './migrate.js';
 import { ensureDailyPartition } from './partitions.js';
 
-/** Manual step for now (`pnpm run db:migrate`) — not run automatically on
- * server boot, since that would require DATABASE_URL to be set even for
- * typecheck/lint/test. Real deploys would call this from a release step. */
 async function main(): Promise<void> {
   const pool = getPool();
   const applied = await runMigrations(pool);

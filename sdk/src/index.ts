@@ -1,7 +1,4 @@
-/**
- * @renderlab/sdk — public entry point. See ARCHITECTURE.md section 4 for the
- * full documented API surface and section 5 for the render-reason heuristic.
- */
+
 export { init } from './init.js';
 export { RenderLabProvider } from './provider/RenderLabProvider.js';
 export type { RenderLabProviderProps } from './provider/RenderLabProvider.js';

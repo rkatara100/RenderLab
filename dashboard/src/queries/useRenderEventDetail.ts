@@ -3,8 +3,6 @@ import type { RenderEventDetail } from '@renderlab/shared-types';
 import { apiFetch } from '../lib/api-client';
 import type { SelectedEventRef } from '../stores/useTimelineStore';
 
-/** `ts` travels alongside `eventId` (see useTimelineStore's SelectedEventRef
- * doc comment) so the lookup stays indexed on the server. */
 export function useRenderEventDetail(
   sessionId: string | null,
   event: SelectedEventRef | null,

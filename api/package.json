@@ -10,7 +10,8 @@
     "lint": "eslint . --max-warnings 0",
     "test": "vitest run",
     "dev": "tsx watch src/index.ts",
-    "db:migrate": "tsx src/db/runMigrate.ts"
+    "db:migrate": "tsx src/db/runMigrate.ts",
+    "db:seed": "tsx src/db/seedProject.ts"
   },
   "dependencies": {
     "@fastify/cors": "^11.3.0",

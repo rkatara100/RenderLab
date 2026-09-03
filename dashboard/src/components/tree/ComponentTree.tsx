@@ -9,14 +9,6 @@ export interface ComponentTreeProps {
   onSelect: (componentId: number) => void;
 }
 
-/**
- * Renders the session's components as a flat, sortable list rather than a
- * nested tree: Phase 2 dedupes component identity by `componentName` alone,
- * not full ancestor-path position (documented there and in ARCHITECTURE.md
- * §8.8 — the SDK's per-mount instance ids aren't stable across sessions), so
- * there's no reliable parent/child structure to nest by yet. Real tree
- * nesting is a Phase 6/8 follow-up once the SDK sends stable ancestor names.
- */
 export function ComponentTree({
   components,
   searchQuery,

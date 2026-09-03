@@ -1,7 +1,5 @@
 import type { RenderReason } from '@renderlab/shared-types';
 
-/** Matches the `render_events.render_reason` column comment in
- * migrations/001_init.sql / ARCHITECTURE.md §3.1. */
 const CODES: Record<RenderReason, number> = {
   mount: 1,
   'props-changed': 2,
@@ -19,35 +17,16 @@ const REASONS_BY_CODE: Record<number, RenderReason> = Object.fromEntries(
   Object.entries(CODES).map(([reason, code]) => [code, reason as RenderReason]),
 );
 
-/** Read-side inverse of `renderReasonToCode`, used when serving raw events
- * back to the dashboard (Phase 4 timeline, Phase 5 why-did-it-render) —
- * callers should never need to know about the numeric encoding. */
 export function codeToRenderReason(code: number): RenderReason {
   const reason = REASONS_BY_CODE[code];
   if (!reason) throw new Error(`renderReasonCodes: unknown render_reason code ${code}`);
   return reason;
 }
 
-/**
- * A render counts as "avoidable" — the definition behind
- * `is_avoidable`/`avoidable_count`/`total_wasted_ms` — when it fired purely
- * because an ancestor re-rendered and this component wasn't memoized
- * (renderReason `'parent-rerender'`, which the SDK's heuristic only assigns
- * when `isMemoized` is false — see renderReason.ts rule 5). Wrapping the
- * component in `React.memo` would very likely have prevented it.
- */
 export function isAvoidableRender(reason: RenderReason): boolean {
   return reason === 'parent-rerender';
 }
 
-/**
- * Which renders are worth paying JSONB storage for on every row
- * (ARCHITECTURE.md §3.1: "only populated when avoidable or sampled", not
- * unconditionally). `props-changed` is the single most common diagnostic
- * case — without it, Phase 5's why-did-it-render panel would have nothing
- * to show for the most frequent reason a component re-renders.
- * `parent-rerender` (avoidable) was already covered.
- */
 export function shouldPersistPropsDiff(reason: RenderReason): boolean {
   return reason === 'props-changed' || isAvoidableRender(reason);
 }

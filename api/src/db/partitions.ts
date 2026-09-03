@@ -4,19 +4,10 @@ function isoDate(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
 
-/** Table names are derived only from internal `Date` objects, never request
- * input — safe to interpolate directly (DDL doesn't support parameterized
- * identifiers). */
 function partitionName(date: Date): string {
   return `render_events_${isoDate(date).replaceAll('-', '_')}`;
 }
 
-/**
- * Creates a day's `render_events` partition if it doesn't exist yet.
- * Idempotent — safe to call on every ingest-service boot or from a daily
- * cron (ARCHITECTURE.md §3.1/§3.5: partition management via a scheduled job,
- * not pg_partman).
- */
 export async function ensureDailyPartition(pool: Pool, date: Date = new Date()): Promise<void> {
   const name = partitionName(date);
   const start = isoDate(date);
@@ -26,14 +17,14 @@ export async function ensureDailyPartition(pool: Pool, date: Date = new Date()):
   );
 }
 
-/**
- * Retention (ARCHITECTURE.md §3.2): rolls a day's raw render_events into
- * render_events_daily_rollup, then drops the partition — a `DROP TABLE`,
- * not a `DELETE`, so no vacuum storm on the hot table.
- */
 export async function rollupAndDropPartition(pool: Pool, date: Date): Promise<void> {
   const name = partitionName(date);
   const day = isoDate(date);
+
+  const { rows } = await pool.query<{ exists: string | null }>('SELECT to_regclass($1) AS exists', [
+    name,
+  ]);
+  if (!rows[0]?.exists) return;
 
   await pool.query(
     `INSERT INTO render_events_daily_rollup
@@ -56,7 +47,6 @@ export async function rollupAndDropPartition(pool: Pool, date: Date): Promise<vo
   await pool.query(`DROP TABLE IF EXISTS ${name}`);
 }
 
-/** Retention window is 7 days (ARCHITECTURE.md §3.2, table). Call once a day. */
 export async function rollupAndDropExpiredPartitions(
   pool: Pool,
   retentionDays = 7,

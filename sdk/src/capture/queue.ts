@@ -1,7 +1,5 @@
 import type { TelemetryEvent } from '@renderlab/shared-types';
 
-/** The minimal shape `useRenderCapture` needs — lets tests substitute a
- * trivial fake without constructing a real timer-driven `BatchQueue`. */
 export interface EventSink {
   enqueue: (event: TelemetryEvent) => void;
 }
@@ -17,14 +15,6 @@ function estimateBytes(event: TelemetryEvent): number {
   return JSON.stringify(event).length;
 }
 
-/**
- * Client-side batching buffer. Flushes at `maxSize` events or
- * `flushIntervalMs`, whichever comes first (ARCHITECTURE.md §3.4 default:
- * 250 / 2000ms). `maxQueueBytes` is a backpressure ceiling — if flushes stop
- * succeeding (offline, endpoint down) the oldest events are dropped rather
- * than growing memory unboundedly; dropping oldest-first keeps the most
- * recent (most actionable) renders.
- */
 export class BatchQueue implements EventSink {
   private buffer: TelemetryEvent[] = [];
   private bytes = 0;
