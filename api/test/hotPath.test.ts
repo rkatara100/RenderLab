@@ -27,8 +27,8 @@ describe('recordBatchHotPath', () => {
     const duration = await redis.hgetall(redisKeys.componentDurationMs('p1', 's1'));
 
     expect(counts?.['7']).toBe('2');
-    expect(avoidable?.['7']).toBe('1'); // only the one avoidable render
-    expect(Number(duration?.['7'])).toBe(5000); // (2 + 3) ms stored as microseconds
+    expect(avoidable?.['7']).toBe('1');
+    expect(Number(duration?.['7'])).toBe(5000);
   });
 
   it('is a no-op beyond presence refresh for an empty batch', async () => {

@@ -19,9 +19,9 @@ describe('flushSessionRollup', () => {
     const rollupCalls = fake.calls.filter((c) => c.text.includes('session_component_rollups'));
     const sessionUpdateCalls = fake.calls.filter((c) => c.text.includes('UPDATE sessions'));
 
-    expect(rollupCalls).toHaveLength(2); // one per distinct componentId
+    expect(rollupCalls).toHaveLength(2);
     expect(sessionUpdateCalls).toHaveLength(1);
-    expect(sessionUpdateCalls[0]?.params).toEqual(['s1', 2, 2]); // 2 renders total; only component 1's 2ms was avoidable
+    expect(sessionUpdateCalls[0]?.params).toEqual(['s1', 2, 2]);
 
     expect(await redis.hgetall(redisKeys.componentCounts('p1', 's1'))).toBeNull();
   });

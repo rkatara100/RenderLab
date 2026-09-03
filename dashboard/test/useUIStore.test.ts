@@ -15,7 +15,7 @@ describe('useUIStore', () => {
   });
 
   it('resolves an explicit theme choice directly, ignoring system preference', () => {
-    setMatchMedia(true); // system is dark
+    setMatchMedia(true);
     useUIStore.getState().setTheme('light');
     expect(useUIStore.getState().resolvedTheme).toBe('light');
   });
@@ -28,8 +28,8 @@ describe('useUIStore', () => {
 
   it('applySystemTheme only affects resolution while theme is "system"', () => {
     useUIStore.setState({ theme: 'dark' });
-    useUIStore.getState().applySystemTheme(false); // system says light
-    expect(useUIStore.getState().resolvedTheme).toBe('dark'); // explicit choice wins
+    useUIStore.getState().applySystemTheme(false);
+    expect(useUIStore.getState().resolvedTheme).toBe('dark');
 
     useUIStore.setState({ theme: 'system' });
     useUIStore.getState().applySystemTheme(false);

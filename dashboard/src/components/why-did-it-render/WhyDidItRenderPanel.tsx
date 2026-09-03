@@ -10,12 +10,6 @@ export interface WhyDidItRenderPanelProps {
   event: SelectedEventRef | null;
 }
 
-/**
- * Surfaces the SDK's render-reason heuristic (sdk/src/instrumentation/renderReason.ts)
- * for one specific render in a form a developer can act on: not just the
- * reason label, but what changed (props/context diff) and what to do about
- * it (actionableSuggestion.ts).
- */
 export function WhyDidItRenderPanel({
   sessionId,
   event,

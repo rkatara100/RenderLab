@@ -13,13 +13,6 @@ function isMemoComponent(value: unknown): boolean {
   );
 }
 
-/**
- * Wraps `Component` in a real `<Profiler>` boundary — this is the accurate
- * timing path (real `actualDuration`/`baseDuration` from React itself). If
- * `Component` is already `React.memo`-wrapped, a bailed-out render emits no
- * event at all (Profiler never calls `onRender` for a fully-skipped subtree)
- * — this is intended, documented behavior (ARCHITECTURE.md §5), not a bug.
- */
 export function withRenderLabProfiler<P extends object>(
   Component: ComponentType<P>,
   options?: { name?: string },

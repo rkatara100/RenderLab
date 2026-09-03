@@ -10,7 +10,7 @@ export interface RenderReasonInput {
   phase: RenderPhase;
   propsDiff: PropDiffEntry[];
   contextDiff: ContextDiffEntry[];
-  /** null = component doesn't use useRenderLabState, so state changes can't be observed. */
+
   stateChanged: boolean | null;
   isMemoized: boolean;
   parentRenderedThisCommit: boolean;
@@ -21,11 +21,6 @@ export interface RenderReasonResult {
   detail: string;
 }
 
-/**
- * Deterministic, ordered rule list — first match wins. See ARCHITECTURE.md
- * section 5 for the full justification of this order and its documented
- * limitations (memo bail-out is inferred elsewhere, not by this function).
- */
 export function computeRenderReason(input: RenderReasonInput): RenderReasonResult {
   const { phase, propsDiff, contextDiff, stateChanged, isMemoized, parentRenderedThisCommit } =
     input;

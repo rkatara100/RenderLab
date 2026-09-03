@@ -4,9 +4,6 @@ import type { SessionSummary } from '@renderlab/shared-types';
 import { useSessions } from './useSessions';
 import { useSessionSelectionStore } from '../stores/useSessionSelectionStore';
 
-/** Shared by the tree and timeline views: fetches sessions and, once they
- * load, defaults the shared session selection to the most recent one if
- * nothing is selected yet. */
 export function useSessionsWithDefaultSelection(): UseQueryResult<SessionSummary[], Error> {
   const sessionsQuery = useSessions();
   const selectedSessionId = useSessionSelectionStore((state) => state.selectedSessionId);

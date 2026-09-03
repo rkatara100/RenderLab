@@ -12,12 +12,6 @@ export class ApiError extends Error {
   }
 }
 
-/**
- * Every dashboard read goes through this. Distinguishes "no key configured"
- * (points the user at Settings), a network failure (offline/API
- * unreachable), and an HTTP error status — each renders a different message
- * in ErrorState rather than one generic "something went wrong".
- */
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const { apiBaseUrl, apiKey } = useSettingsStore.getState();
   if (!apiKey) {

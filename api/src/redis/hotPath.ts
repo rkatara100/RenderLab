@@ -1,8 +1,5 @@
 import { redisKeys } from './keys.js';
 
-/** The minimal subset of the Upstash Redis client this module needs — lets
- * tests substitute a plain fake instead of a real REST-backed client. The
- * real `Redis` class from `@upstash/redis` satisfies this structurally. */
 export interface RedisLike {
   set: (key: string, value: string | number, opts?: { ex?: number; nx?: true }) => Promise<unknown>;
   incrby: (key: string, amount: number) => Promise<number>;
@@ -21,14 +18,6 @@ export interface HotPathEvent {
 const SESSION_KEY_TTL_SECONDS = 3600;
 const PRESENCE_TTL_SECONDS = 60;
 
-/**
- * Updates the live-dashboard hot keys for one ingested batch
- * (ARCHITECTURE.md §3.3): presence TTL (liveness signal), a rolling session
- * render counter, and per-component count/duration/avoidable-count hashes
- * that `flushJob.ts` periodically upserts into Postgres. Duration is stored
- * as integer microseconds (`HINCRBY` is integer-only) to avoid float
- * precision drift, converted back to ms on read.
- */
 export async function recordBatchHotPath(
   redis: RedisLike,
   projectId: string,
@@ -64,12 +53,6 @@ export async function recordBatchHotPath(
   await redis.expire(avoidableDurationKey, SESSION_KEY_TTL_SECONDS);
 }
 
-/**
- * `SET key val NX EX 300` (ARCHITECTURE.md §3.4): if the key already exists,
- * Upstash's client returns `null` for a failed NX set — meaning this
- * `batch_id` was already processed (an SDK retry after a network blip),
- * so the caller should treat it as a successful no-op replay, not re-insert.
- */
 export async function isDuplicateBatch(
   redis: RedisLike,
   projectId: string,

@@ -1,5 +1,4 @@
-/** Key naming scheme from ARCHITECTURE.md §3.3 — `rl:{project}:...` for
- * tenant isolation and easy SCAN-based debugging/cleanup. */
+
 export const redisKeys = {
   presence: (projectId: string, sessionId: string): string =>
     `rl:${projectId}:session:${sessionId}:presence`,

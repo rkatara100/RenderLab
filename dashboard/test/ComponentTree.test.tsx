@@ -1,4 +1,4 @@
-// @vitest-environment jsdom
+
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import type { ComponentSummary } from '@renderlab/shared-types';

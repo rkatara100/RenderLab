@@ -5,13 +5,6 @@ import type { Pool } from 'pg';
 
 const MIGRATIONS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'migrations');
 
-/**
- * Minimal, honest migration runner: applies numbered .sql files in order,
- * tracked in `schema_migrations`. A versioned framework with rollback
- * (node-pg-migrate, etc.) is deferred — explicit Phase 2 simplification.
- * There's one schema file so far; this earns its keep once the schema needs
- * to evolve across deploys without wiping data.
- */
 export async function runMigrations(pool: Pool): Promise<string[]> {
   await pool.query(
     `CREATE TABLE IF NOT EXISTS schema_migrations (

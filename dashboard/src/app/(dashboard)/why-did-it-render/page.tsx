@@ -12,12 +12,6 @@ import { SessionPicker } from '../../../components/shared/SessionPicker';
 import { Timeline } from '../../../components/timeline/Timeline';
 import { WhyDidItRenderPanel } from '../../../components/why-did-it-render/WhyDidItRenderPanel';
 
-/**
- * The same Timeline component as the render-timeline view, filtered to
- * `avoidableOnly` (ARCHITECTURE.md §3.2 point 4's partial index) — this is
- * deliberately a reuse, not a parallel implementation: "why did it render"
- * is the timeline scoped to the renders worth acting on.
- */
 export default function WhyDidItRenderPage(): React.JSX.Element {
   const sessionsQuery = useSessionsWithDefaultSelection();
   const selectedSessionId = useSessionSelectionStore((state) => state.selectedSessionId);

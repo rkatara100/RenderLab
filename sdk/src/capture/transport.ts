@@ -11,13 +11,6 @@ export interface SessionRef {
   startedAt: number;
 }
 
-/**
- * POSTs a batch to `/api/ingest/events` (ARCHITECTURE.md §3.4). Errors are
- * swallowed here — the SDK must never throw into the host app; a failed
- * flush simply loses that batch (no offline retry queue in Phase 1, see
- * phase summary for why IndexedDB-backed durability is deferred, not silently
- * skipped).
- */
 export function sendBatch(
   events: TelemetryEvent[],
   session: SessionRef,
@@ -43,7 +36,5 @@ export function sendBatch(
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${options.apiKey}` },
     body,
     keepalive: true,
-  }).catch(() => {
-    /* swallowed intentionally — see doc comment above */
-  });
+  }).catch(() => {});
 }

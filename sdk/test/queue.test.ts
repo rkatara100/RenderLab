@@ -82,7 +82,7 @@ describe('BatchQueue', () => {
 
   it('drops the oldest events once maxQueueBytes is exceeded', () => {
     const onFlush = vi.fn();
-    // Each event serializes to roughly the same size; cap tight enough to force eviction.
+
     const oneEventBytes = JSON.stringify(makeEvent()).length;
     const queue = new BatchQueue({
       maxSize: 100,

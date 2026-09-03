@@ -35,14 +35,6 @@ function resolve(theme: ThemePreference, systemIsDark: boolean): ResolvedTheme {
   return theme === 'system' ? (systemIsDark ? 'dark' : 'light') : theme;
 }
 
-/**
- * UI-only state (ARCHITECTURE.md §7) — no server data lives here, React
- * Query owns that. Only `theme` is persisted; everything else is per-tab
- * ephemeral. `resolvedTheme` is recomputed whenever `theme` changes or the
- * OS preference changes (see `useThemeSync` in AppProviders), not derived
- * lazily at render time, so every subscriber sees the same value without
- * each one re-running `matchMedia`.
- */
 export const useUIStore = create<UIState & UIActions>()(
   persist(
     (set, get) => ({
