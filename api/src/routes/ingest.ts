@@ -1,12 +1,21 @@
 import type { FastifyInstance } from 'fastify';
 import type { Pool } from 'pg';
-import type { RenderEvent, TelemetryEvent } from '@renderlab/shared-types';
+import type {
+  LongTaskEvent,
+  NetworkRequestEvent,
+  RenderEvent,
+  TelemetryEvent,
+} from '@renderlab/shared-types';
 import { authenticateRequest } from '../auth/apiKey.js';
 import {
   endSession,
+  insertLongTaskEvents,
+  insertNetworkRequestEvents,
   insertRenderEvents,
   upsertComponent,
   upsertSession,
+  type LongTaskEventRow,
+  type NetworkRequestEventRow,
   type RenderEventRow,
 } from '../db/repository.js';
 import { flushSessionRollup } from '../redis/flushJob.js';
@@ -23,9 +32,6 @@ import {
   shouldPersistPropsDiff,
 } from './renderReasonCodes.js';
 
-/** Hard server-side cap regardless of SDK behavior (ARCHITECTURE.md §3.4) —
- * the SDK's own default batches at 250/2s; this defends against a
- * misbehaving or compromised SDK instance. */
 const MAX_EVENTS_PER_BATCH = 500;
 
 interface IngestEventsBody {
@@ -53,6 +59,14 @@ function isRenderEvent(event: TelemetryEvent): event is RenderEvent {
   return event.type === 'render';
 }
 
+function isLongTaskEvent(event: TelemetryEvent): event is LongTaskEvent {
+  return event.type === 'long-task';
+}
+
+function isNetworkRequestEvent(event: TelemetryEvent): event is NetworkRequestEvent {
+  return event.type === 'network-request';
+}
+
 export function registerIngestRoutes(app: FastifyInstance, deps: IngestRouteDeps): void {
   const { pool, redis } = deps;
 
@@ -70,8 +84,6 @@ export function registerIngestRoutes(app: FastifyInstance, deps: IngestRouteDeps
       return reply.code(413).send({ error: `batch exceeds ${MAX_EVENTS_PER_BATCH} events` });
     }
 
-    // Idempotent replay: an SDK retry after a network blip that actually
-    // succeeded gets a 202 without re-inserting (ARCHITECTURE.md §3.4).
     if (await isDuplicateBatch(redis, project.id, body.batch_id)) {
       return reply
         .code(202)
@@ -89,8 +101,6 @@ export function registerIngestRoutes(app: FastifyInstance, deps: IngestRouteDeps
 
     const renderEvents = body.events.filter(isRenderEvent);
 
-    // Dedupe component upserts within the batch — O(unique components), not
-    // O(events), which matters directly at 10k+ events/session.
     const componentIdByName = new Map<string, number>();
     for (const name of new Set(renderEvents.map((e) => e.componentName))) {
       componentIdByName.set(name, await upsertComponent(pool, project.id, name));
@@ -100,7 +110,7 @@ export function registerIngestRoutes(app: FastifyInstance, deps: IngestRouteDeps
     const hotPathBatch: HotPathEvent[] = [];
     for (const event of renderEvents) {
       const componentId = componentIdByName.get(event.componentName);
-      if (componentId === undefined) continue; // unreachable given the loop above, but keeps TS honest
+      if (componentId === undefined) continue;
       const isAvoidable = isAvoidableRender(event.renderReason);
 
       rows.push({
@@ -124,9 +134,30 @@ export function registerIngestRoutes(app: FastifyInstance, deps: IngestRouteDeps
 
     await insertRenderEvents(pool, project.id, rows);
     await recordBatchHotPath(redis, project.id, sessionId, hotPathBatch);
-    // Flushed inline per batch rather than on a separate timer — see
-    // flushJob.ts doc comment for the trade-off this makes.
+
     await flushSessionRollup(pool, redis, project.id, sessionId);
+
+    const longTaskRows: LongTaskEventRow[] = body.events.filter(isLongTaskEvent).map((event) => ({
+      sessionId,
+      ts: new Date(event.timestamp).toISOString(),
+      durationMs: event.duration,
+      attribution: event.attribution,
+    }));
+    await insertLongTaskEvents(pool, project.id, longTaskRows);
+
+    const networkRequestRows: NetworkRequestEventRow[] = body.events
+      .filter(isNetworkRequestEvent)
+      .map((event) => ({
+        sessionId,
+        ts: new Date(event.timestamp).toISOString(),
+        url: event.url,
+        method: event.method,
+        status: event.status ?? null,
+        durationMs: event.duration,
+        initiatorType: event.initiatorType,
+        transferSize: event.transferSize ?? null,
+      }));
+    await insertNetworkRequestEvents(pool, project.id, networkRequestRows);
 
     return reply
       .code(202)

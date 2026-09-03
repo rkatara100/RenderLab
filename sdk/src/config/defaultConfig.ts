@@ -11,6 +11,8 @@ export interface ResolvedConfig {
   maxPropDepth: number;
   maxPropStringLength: number;
   replay: { enabled: boolean; captureStateHooks: boolean };
+  longTasks: { enabled: boolean };
+  network: { enabled: boolean; ignoreUrls: Array<string | RegExp> };
   transport: 'fetch' | 'beacon';
   onError: (error: RenderLabSDKError) => void;
   enabled: boolean;
@@ -18,12 +20,6 @@ export interface ResolvedConfig {
 
 const DEFAULT_ENDPOINT = 'https://ingest.renderlab.dev';
 
-/**
- * Fills defaults per ARCHITECTURE.md §4.1/§3.4. Batch defaults (250 events /
- * 2000ms) match the ingestion API's documented SDK-flush behavior exactly —
- * changing one without the other would silently violate the ingestion
- * contract's throughput assumptions.
- */
 export function resolveConfig(config: RenderLabConfig): ResolvedConfig {
   if (!config.apiKey) {
     throw new Error('RenderLab: config.apiKey is required');
@@ -50,6 +46,13 @@ export function resolveConfig(config: RenderLabConfig): ResolvedConfig {
     replay: {
       enabled: config.replay?.enabled ?? false,
       captureStateHooks: config.replay?.captureStateHooks ?? false,
+    },
+    longTasks: {
+      enabled: config.longTasks?.enabled ?? true,
+    },
+    network: {
+      enabled: config.network?.enabled ?? true,
+      ignoreUrls: config.network?.ignoreUrls ?? [],
     },
     transport: config.transport ?? 'fetch',
     onError: config.onError ?? (() => {}),

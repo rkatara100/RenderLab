@@ -1,11 +1,5 @@
 import type { ContextDiffEntry, PropDiffEntry, RenderReason } from './renderReason.js';
 
-/**
- * Dashboard read-API view models (camelCase JSON) — distinct from the SDK's
- * ingest wire format (events.ts), which is fixed by what the SDK actually
- * sends. These are RenderLab's own read contracts, shared between api/ and
- * dashboard/ so the two can't drift silently.
- */
 export interface SessionSummary {
   id: string;
   startedAt: string;
@@ -28,10 +22,6 @@ export interface ComponentSummary {
   lastRenderAt: string;
 }
 
-/** One raw render event as shown in the Phase 4 timeline / Phase 5
- * why-did-it-render panel. `renderReason` is decoded server-side from the
- * stored SMALLINT (ARCHITECTURE.md §3.1) back to the SDK's string union, so
- * the dashboard never needs to know about the numeric encoding. */
 export interface RenderTimelineEvent {
   id: string;
   ts: string;
@@ -52,16 +42,37 @@ export interface RenderTimelinePage {
   nextCursor: EventPageCursor | null;
 }
 
-/**
- * Phase 5's "why did this render?" drill-down for one specific event. Kept
- * out of `RenderTimelineEvent`/`RenderTimelinePage` deliberately — the
- * timeline lists up to hundreds of rows per page, and `propsDiff`/
- * `contextDiff` can be non-trivial JSON payloads not worth carrying on every
- * row of a list view a user is scanning, only on the one row they've
- * clicked into.
- */
 export interface RenderEventDetail extends RenderTimelineEvent {
   reasonDetail: string | null;
   propsDiff: PropDiffEntry[] | null;
   contextDiff: ContextDiffEntry[] | null;
+}
+
+export interface LongTaskSummary {
+  id: string;
+  ts: string;
+  durationMs: number;
+  attribution: string[];
+  correlatedComponentNames: string[];
+}
+
+export interface LongTaskPage {
+  tasks: LongTaskSummary[];
+  nextCursor: EventPageCursor | null;
+}
+
+export interface NetworkRequestSummary {
+  id: string;
+  ts: string;
+  url: string;
+  method: string;
+  status: number | null;
+  durationMs: number;
+  initiatorType: string;
+  transferSize: number | null;
+}
+
+export interface NetworkRequestPage {
+  requests: NetworkRequestSummary[];
+  nextCursor: EventPageCursor | null;
 }
