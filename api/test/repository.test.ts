@@ -2,7 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   findProjectByApiKey,
   getRenderEventDetail,
+  insertLongTaskEvents,
+  insertNetworkRequestEvents,
   insertRenderEvents,
+  listLongTaskEvents,
+  listNetworkRequestEvents,
   listRenderEvents,
   listSessionComponents,
   listSessions,
@@ -20,7 +24,7 @@ describe('findProjectByApiKey', () => {
 
     const project = await findProjectByApiKey(fake as unknown as Pool, 'abcd1234-real');
 
-    expect(fake.calls[0]?.params).toEqual(['abcd1234']); // first 8 chars
+    expect(fake.calls[0]?.params).toEqual(['abcd1234']);
     expect(project).toEqual({ id: 'p1', isActive: true });
   });
 
@@ -191,6 +195,137 @@ describe('listRenderEvents', () => {
     const fake = createFakePool();
     await listRenderEvents(fake as unknown as Pool, { sessionId: 's1', avoidableOnly: true });
     expect(fake.calls[0]?.text).toContain('r.is_avoidable = true');
+  });
+});
+
+describe('insertLongTaskEvents', () => {
+  it('is a no-op for an empty batch', async () => {
+    const fake = createFakePool();
+    await insertLongTaskEvents(fake as unknown as Pool, 'p1', []);
+    expect(fake.calls).toHaveLength(0);
+  });
+
+  it('builds one multi-row INSERT with 5 params per row, in order', async () => {
+    const fake = createFakePool();
+    await insertLongTaskEvents(fake as unknown as Pool, 'p1', [
+      { sessionId: 's1', ts: 't1', durationMs: 75, attribution: ['script'] },
+    ]);
+
+    expect(fake.calls).toHaveLength(1);
+    expect(fake.calls[0]?.text).toContain('INSERT INTO long_task_events');
+    expect(fake.calls[0]?.text).toContain('VALUES ($1, $2, $3, $4, $5)');
+    expect(fake.calls[0]?.params).toEqual(['p1', 's1', 't1', 75, ['script']]);
+  });
+});
+
+describe('insertNetworkRequestEvents', () => {
+  it('is a no-op for an empty batch', async () => {
+    const fake = createFakePool();
+    await insertNetworkRequestEvents(fake as unknown as Pool, 'p1', []);
+    expect(fake.calls).toHaveLength(0);
+  });
+
+  it('builds one multi-row INSERT with 9 params per row, in order', async () => {
+    const fake = createFakePool();
+    await insertNetworkRequestEvents(fake as unknown as Pool, 'p1', [
+      {
+        sessionId: 's1',
+        ts: 't1',
+        url: 'https://api.example.com/data',
+        method: 'UNKNOWN',
+        status: 200,
+        durationMs: 42,
+        initiatorType: 'fetch',
+        transferSize: 1200,
+      },
+    ]);
+
+    expect(fake.calls).toHaveLength(1);
+    expect(fake.calls[0]?.text).toContain('INSERT INTO network_request_events');
+    expect(fake.calls[0]?.text).toContain('VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)');
+    expect(fake.calls[0]?.params).toEqual([
+      'p1',
+      's1',
+      't1',
+      'https://api.example.com/data',
+      'UNKNOWN',
+      200,
+      42,
+      'fetch',
+      1200,
+    ]);
+  });
+});
+
+describe('listLongTaskEvents', () => {
+  it('uses a keyset condition on (ts, id), then batches component correlation in a second query', async () => {
+    const fake = createFakePool((text) => {
+      if (text.includes('FROM long_task_events')) {
+        return { rows: [{ id: '1', ts: '2026-01-01T00:00:00.000Z', durationMs: 80, attribution: [] }] };
+      }
+      if (text.includes('UNNEST')) {
+        return { rows: [{ taskId: '1', componentNames: ['SearchBox'] }] };
+      }
+      return { rows: [] };
+    });
+
+    const tasks = await listLongTaskEvents(fake as unknown as Pool, {
+      sessionId: 's1',
+      cursor: { ts: '2026-01-01T00:00:00.000Z', id: '100' },
+      limit: 50,
+    });
+
+    expect(fake.calls).toHaveLength(2);
+    expect(fake.calls[0]?.text).not.toContain('OFFSET');
+    expect(fake.calls[0]?.text).toContain('(ts, id) < ($2, $3)');
+    expect(fake.calls[1]?.text).toContain('JOIN render_events r');
+    expect(fake.calls[1]?.params).toEqual(['s1', ['1'], ['2026-01-01T00:00:00.000Z'], [80]]);
+    expect(tasks).toEqual([
+      {
+        id: '1',
+        ts: '2026-01-01T00:00:00.000Z',
+        durationMs: 80,
+        attribution: [],
+        correlatedComponentNames: ['SearchBox'],
+      },
+    ]);
+  });
+
+  it('skips the correlation query entirely when the page is empty', async () => {
+    const fake = createFakePool(() => ({ rows: [] }));
+    const tasks = await listLongTaskEvents(fake as unknown as Pool, { sessionId: 's1' });
+    expect(tasks).toEqual([]);
+    expect(fake.calls).toHaveLength(1);
+  });
+
+  it('caps limit at 500 even if a larger value is requested', async () => {
+    const fake = createFakePool();
+    await listLongTaskEvents(fake as unknown as Pool, { sessionId: 's1', limit: 10_000 });
+    expect(fake.calls[0]?.text).toContain('LIMIT 500');
+  });
+});
+
+describe('listNetworkRequestEvents', () => {
+  it('uses a keyset condition on (ts, id), never OFFSET', async () => {
+    const fake = createFakePool();
+    await listNetworkRequestEvents(fake as unknown as Pool, {
+      sessionId: 's1',
+      cursor: { ts: '2026-01-01T00:00:00.000Z', id: '100' },
+      limit: 50,
+    });
+
+    const { text, params } = fake.calls[0]!;
+    expect(text).not.toContain('OFFSET');
+    expect(text).toContain('(ts, id) < ($2, $3)');
+    expect(text).toContain('ORDER BY ts DESC, id DESC');
+    expect(text).toContain('LIMIT 50');
+    expect(params).toEqual(['s1', '2026-01-01T00:00:00.000Z', '100']);
+  });
+
+  it('caps limit at 500 even if a larger value is requested', async () => {
+    const fake = createFakePool();
+    await listNetworkRequestEvents(fake as unknown as Pool, { sessionId: 's1', limit: 10_000 });
+    expect(fake.calls[0]?.text).toContain('LIMIT 500');
   });
 });
 

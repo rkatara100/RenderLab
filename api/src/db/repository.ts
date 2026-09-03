@@ -5,11 +5,6 @@ export interface Project {
   isActive: boolean;
 }
 
-/**
- * Prefix-indexed lookup then full-key compare among candidates
- * (ARCHITECTURE.md §3.4) — avoids a full-table scan while still comparing
- * the complete key, not just the prefix.
- */
 export async function findProjectByApiKey(pool: Pool, apiKey: string): Promise<Project | null> {
   const prefix = apiKey.slice(0, 8);
   const { rows } = await pool.query<{ id: string; api_key: string; is_active: boolean }>(
@@ -29,8 +24,6 @@ export interface SessionInput {
   appVersion?: string | undefined;
 }
 
-/** Idempotent per (project, sdk_session_key) — safe under SDK batch retry
- * and doubles as the session heartbeat (`last_seen_at`). */
 export async function upsertSession(pool: Pool, input: SessionInput): Promise<string> {
   const { rows } = await pool.query<{ id: string }>(
     `INSERT INTO sessions (project_id, sdk_session_key, started_at, last_seen_at, url, user_agent, app_version)
@@ -62,17 +55,6 @@ export async function endSession(
   );
 }
 
-/**
- * Dedupes by (project, fiber_path_hash). Phase 2 simplification: hashed on
- * `componentName` alone, not full ancestor-path position — the SDK's
- * `componentId` includes a per-mount instance counter (ARCHITECTURE.md §8.8),
- * which isn't stable across sessions, so it can't be used as the identity
- * key without an SDK change to expose a stable, name-based structural path.
- * Consequence: two distinct instances of the same component type (e.g. two
- * `SearchBox` in different parts of the tree) are aggregated together for
- * now. Flagged explicitly, not silently — full path-based identity is a
- * natural Phase 6/8 refinement once the SDK sends stable ancestor names.
- */
 export async function upsertComponent(
   pool: Pool | PoolClient,
   projectId: string,
@@ -115,10 +97,6 @@ const RENDER_EVENT_COLUMNS = [
   'context_diff',
 ];
 
-/** Single multi-row INSERT per batch — the SDK batches up to 250 events
- * (ARCHITECTURE.md §3.4), so this is one round-trip per flush, not one per
- * event. Ordering is reconstructed at read time via `ts`, not insertion
- * order, so no separate per-row sequence column is needed here. */
 export async function insertRenderEvents(
   pool: Pool,
   projectId: string,
@@ -179,17 +157,10 @@ export interface ListRenderEventsParams {
   limit?: number;
   from?: string;
   to?: string;
-  /** Uses `idx_render_events_avoidable` (ARCHITECTURE.md §3.2 point 4) — the
-   * "show me only wasted renders" query the partial index exists for.
-   * Powers Phase 5's why-did-it-render list. */
+
   avoidableOnly?: boolean;
 }
 
-/** Keyset pagination on (ts, id) — never OFFSET (ARCHITECTURE.md §3.2): cost
- * is O(page size) at any depth via the existing (session_id, ts) index,
- * unlike OFFSET which degrades linearly with page depth. Joins `components`
- * for display name — cheap at a capped page size (<=500 rows) via the
- * primary key, and saves the Phase 4 timeline a second round-trip. */
 export async function listRenderEvents(
   pool: Pool,
   params: ListRenderEventsParams,
@@ -244,15 +215,6 @@ export interface RenderEventDetailRow {
   contextDiff: string | null;
 }
 
-/**
- * Phase 5's single-event drill-down. Requires `ts` (not just `eventId`) as
- * a deliberate API choice: `render_events` is range-partitioned and its
- * only index touching `session_id` is `(session_id, ts)`
- * (idx_render_events_session_ts) — looking up by `id` alone would force a
- * scan across every partition. The dashboard already has `ts` from the
- * timeline row the user clicked, so passing it through costs nothing and
- * keeps this lookup indexed, same philosophy as the keyset cursor.
- */
 export async function getRenderEventDetail(
   pool: Pool,
   projectId: string,
@@ -282,10 +244,6 @@ export interface RollupUpdate {
   lastRenderAt: string;
 }
 
-/** Additive upsert — the flush job (redis/flushJob.ts) calls this with only
- * the increment since the last flush, not a running total, so `+ EXCLUDED.*`
- * is correct here (not a plain overwrite). `max_duration_ms` isn't updated
- * here — see flushJob.ts for why it isn't hot-tracked in Phase 2. */
 export async function upsertSessionComponentRollup(
   pool: Pool,
   rollup: RollupUpdate,
@@ -319,10 +277,6 @@ export interface SessionSummaryRow {
   totalWastedMs: number;
 }
 
-/** Session list for the dashboard shell (ARCHITECTURE.md §3.1) — small
- * table, plain LIMIT/ORDER BY is fine here; the 10k+-row concern is
- * render_events, not sessions. "Live" is derived by the caller from
- * `endedAt`/`lastSeenAt`, not stored — see routes/sessions.ts. */
 export async function listSessions(
   pool: Pool,
   projectId: string,
@@ -351,9 +305,6 @@ export interface ComponentSummaryRow {
   lastRenderAt: string;
 }
 
-/** Component tree/list for one session — reads only the pre-aggregated
- * rollup table, never raw render_events (ARCHITECTURE.md §3.2: this is the
- * query that lets the default view skip 10k+ raw rows entirely). */
 export async function listSessionComponents(
   pool: Pool,
   projectId: string,
@@ -384,4 +335,220 @@ export async function updateSessionTotals(
     'UPDATE sessions SET total_render_count = total_render_count + $2, total_wasted_ms = total_wasted_ms + $3 WHERE id = $1',
     [sessionId, addRenderCount, addWastedMs],
   );
+}
+
+export interface LongTaskEventRow {
+  sessionId: string;
+  ts: string;
+  durationMs: number;
+  attribution: string[];
+}
+
+const LONG_TASK_EVENT_COLUMNS = ['project_id', 'session_id', 'ts', 'duration_ms', 'attribution'];
+
+export async function insertLongTaskEvents(
+  pool: Pool,
+  projectId: string,
+  rows: LongTaskEventRow[],
+): Promise<void> {
+  if (rows.length === 0) return;
+
+  const columnsPerRow = LONG_TASK_EVENT_COLUMNS.length;
+  const values: unknown[] = [];
+  const tuples: string[] = [];
+  rows.forEach((row, index) => {
+    const base = index * columnsPerRow;
+    const placeholders = Array.from(
+      { length: columnsPerRow },
+      (_, offset) => `$${base + offset + 1}`,
+    );
+    tuples.push(`(${placeholders.join(', ')})`);
+    values.push(projectId, row.sessionId, row.ts, row.durationMs, row.attribution);
+  });
+
+  await pool.query(
+    `INSERT INTO long_task_events (${LONG_TASK_EVENT_COLUMNS.join(', ')})
+     VALUES ${tuples.join(', ')}`,
+    values,
+  );
+}
+
+export interface NetworkRequestEventRow {
+  sessionId: string;
+  ts: string;
+  url: string;
+  method: string;
+  status: number | null;
+  durationMs: number;
+  initiatorType: string;
+  transferSize: number | null;
+}
+
+const NETWORK_REQUEST_EVENT_COLUMNS = [
+  'project_id',
+  'session_id',
+  'ts',
+  'url',
+  'method',
+  'status',
+  'duration_ms',
+  'initiator_type',
+  'transfer_size',
+];
+
+export async function insertNetworkRequestEvents(
+  pool: Pool,
+  projectId: string,
+  rows: NetworkRequestEventRow[],
+): Promise<void> {
+  if (rows.length === 0) return;
+
+  const columnsPerRow = NETWORK_REQUEST_EVENT_COLUMNS.length;
+  const values: unknown[] = [];
+  const tuples: string[] = [];
+  rows.forEach((row, index) => {
+    const base = index * columnsPerRow;
+    const placeholders = Array.from(
+      { length: columnsPerRow },
+      (_, offset) => `$${base + offset + 1}`,
+    );
+    tuples.push(`(${placeholders.join(', ')})`);
+    values.push(
+      projectId,
+      row.sessionId,
+      row.ts,
+      row.url,
+      row.method,
+      row.status,
+      row.durationMs,
+      row.initiatorType,
+      row.transferSize,
+    );
+  });
+
+  await pool.query(
+    `INSERT INTO network_request_events (${NETWORK_REQUEST_EVENT_COLUMNS.join(', ')})
+     VALUES ${tuples.join(', ')}`,
+    values,
+  );
+}
+
+export interface LongTaskEventPageRow {
+  id: string;
+  ts: string;
+  durationMs: number;
+  attribution: string[];
+  correlatedComponentNames: string[];
+}
+
+export interface ListLongTaskEventsParams {
+  sessionId: string;
+  cursor?: PageCursor;
+  limit?: number;
+}
+
+async function correlateLongTasksWithComponents(
+  pool: Pool,
+  sessionId: string,
+  tasks: Array<{ id: string; ts: string; durationMs: number }>,
+): Promise<Map<string, string[]>> {
+  if (tasks.length === 0) return new Map();
+
+  const { rows } = await pool.query<{ taskId: string; componentNames: string[] }>(
+    `SELECT lt.id AS "taskId", array_agg(DISTINCT c.display_name) AS "componentNames"
+     FROM UNNEST($2::bigint[], $3::timestamptz[], $4::double precision[]) AS lt(id, ts, duration_ms)
+     JOIN render_events r
+       ON r.session_id = $1
+      AND r.ts >= lt.ts
+      AND r.ts <= lt.ts + make_interval(secs => lt.duration_ms / 1000.0)
+     JOIN components c ON c.id = r.component_id
+     GROUP BY lt.id`,
+    [
+      sessionId,
+      tasks.map((task) => task.id),
+      tasks.map((task) => task.ts),
+      tasks.map((task) => task.durationMs),
+    ],
+  );
+
+  const byTaskId = new Map<string, string[]>();
+  for (const row of rows) byTaskId.set(row.taskId, row.componentNames);
+  return byTaskId;
+}
+
+export async function listLongTaskEvents(
+  pool: Pool,
+  params: ListLongTaskEventsParams,
+): Promise<LongTaskEventPageRow[]> {
+  const limit = Math.min(params.limit ?? 100, 500);
+  const conditions = ['session_id = $1'];
+  const values: unknown[] = [params.sessionId];
+
+  if (params.cursor) {
+    values.push(params.cursor.ts, params.cursor.id);
+    conditions.push(`(ts, id) < ($${values.length - 1}, $${values.length})`);
+  }
+
+  const { rows } = await pool.query<{
+    id: string;
+    ts: string;
+    durationMs: number;
+    attribution: string[];
+  }>(
+    `SELECT id, ts, duration_ms AS "durationMs", attribution
+     FROM long_task_events
+     WHERE ${conditions.join(' AND ')}
+     ORDER BY ts DESC, id DESC
+     LIMIT ${limit}`,
+    values,
+  );
+  if (rows.length === 0) return [];
+
+  const correlated = await correlateLongTasksWithComponents(pool, params.sessionId, rows);
+  return rows.map((row) => ({
+    ...row,
+    correlatedComponentNames: correlated.get(row.id) ?? [],
+  }));
+}
+
+export interface NetworkRequestEventPageRow {
+  id: string;
+  ts: string;
+  url: string;
+  method: string;
+  status: number | null;
+  durationMs: number;
+  initiatorType: string;
+  transferSize: number | null;
+}
+
+export interface ListNetworkRequestEventsParams {
+  sessionId: string;
+  cursor?: PageCursor;
+  limit?: number;
+}
+
+export async function listNetworkRequestEvents(
+  pool: Pool,
+  params: ListNetworkRequestEventsParams,
+): Promise<NetworkRequestEventPageRow[]> {
+  const limit = Math.min(params.limit ?? 100, 500);
+  const conditions = ['session_id = $1'];
+  const values: unknown[] = [params.sessionId];
+
+  if (params.cursor) {
+    values.push(params.cursor.ts, params.cursor.id);
+    conditions.push(`(ts, id) < ($${values.length - 1}, $${values.length})`);
+  }
+
+  const { rows } = await pool.query<NetworkRequestEventPageRow>(
+    `SELECT id, ts, url, method, status, duration_ms AS "durationMs",
+            initiator_type AS "initiatorType", transfer_size AS "transferSize"
+     FROM network_request_events
+     WHERE ${conditions.join(' AND ')}
+     ORDER BY ts DESC, id DESC
+     LIMIT ${limit}`,
+    values,
+  );
+  return rows;
 }

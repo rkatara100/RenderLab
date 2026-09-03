@@ -3,6 +3,8 @@ import type { Pool } from 'pg';
 import type {
   ComponentSummary,
   EventPageCursor,
+  LongTaskSummary,
+  NetworkRequestSummary,
   RenderEventDetail,
   RenderTimelineEvent,
   SessionSummary,
@@ -10,6 +12,8 @@ import type {
 import { authenticateRequest } from '../auth/apiKey.js';
 import {
   getRenderEventDetail,
+  listLongTaskEvents,
+  listNetworkRequestEvents,
   listRenderEvents,
   listSessionComponents,
   listSessions,
@@ -20,9 +24,6 @@ function parseJsonColumn<T>(value: string | null): T | null {
   return value ? (JSON.parse(value) as T) : null;
 }
 
-/** A session is "live" if it hasn't been explicitly ended and was seen
- * recently — matches the Redis presence TTL window (ARCHITECTURE.md §3.3),
- * so the dashboard's badge and the SDK's own liveness signal agree. */
 const LIVE_WINDOW_MS = 60_000;
 
 function isLive(endedAt: string | null, lastSeenAt: string): boolean {
@@ -45,16 +46,22 @@ interface EventDetailQuery {
   ts?: string;
 }
 
+interface PerfEventsQuery {
+  limit?: string;
+  cursorTs?: string;
+  cursorId?: string;
+}
+
+function parseCursor(query: PerfEventsQuery): EventPageCursor | undefined {
+  return query.cursorTs && query.cursorId
+    ? { ts: query.cursorTs, id: query.cursorId }
+    : undefined;
+}
+
 export interface ReadRouteDeps {
   pool: Pool;
 }
 
-/**
- * Read endpoints for the dashboard. Reuses the same project API-key Bearer
- * auth as ingestion (ARCHITECTURE.md §3.5: no separate human login system
- * yet — one project, one key, scoping every read the same way it scopes
- * writes). A real multi-user login is out of scope for this phase.
- */
 export function registerReadRoutes(app: FastifyInstance, deps: ReadRouteDeps): void {
   const { pool } = deps;
 
@@ -85,11 +92,6 @@ export function registerReadRoutes(app: FastifyInstance, deps: ReadRouteDeps): v
     },
   );
 
-  // Phase 4: paginated raw events backing the virtualized render timeline
-  // (ARCHITECTURE.md §3.2/§4). Keyset cursor, never OFFSET — see
-  // repository.ts's listRenderEvents. `avoidableOnly` (Phase 5) drives the
-  // why-did-it-render list via the same partial index the schema already
-  // has for exactly this query.
   app.get<{ Params: { sessionId: string }; Querystring: EventsQuery }>(
     '/api/sessions/:sessionId/events',
     async (request, reply) => {
@@ -131,9 +133,6 @@ export function registerReadRoutes(app: FastifyInstance, deps: ReadRouteDeps): v
     },
   );
 
-  // Phase 5: single-event drill-down for the why-did-it-render panel.
-  // Requires `ts` as a query param — see getRenderEventDetail's doc comment
-  // for why (keeps the lookup indexed under partitioning).
   app.get<{ Params: { sessionId: string; eventId: string }; Querystring: EventDetailQuery }>(
     '/api/sessions/:sessionId/events/:eventId',
     async (request, reply) => {
@@ -165,6 +164,73 @@ export function registerReadRoutes(app: FastifyInstance, deps: ReadRouteDeps): v
         contextDiff: parseJsonColumn<RenderEventDetail['contextDiff']>(row.contextDiff),
       };
       return reply.send(detail);
+    },
+  );
+
+  app.get<{ Params: { sessionId: string }; Querystring: PerfEventsQuery }>(
+    '/api/sessions/:sessionId/long-tasks',
+    async (request, reply) => {
+      const project = await authenticateRequest(pool, request);
+      if (!project) return reply.code(401).send({ error: 'invalid or missing API key' });
+
+      const limit = Math.min(Number(request.query.limit) || DEFAULT_EVENTS_PAGE_SIZE, 500);
+      const cursor = parseCursor(request.query);
+
+      const taskRows = await listLongTaskEvents(pool, {
+        sessionId: request.params.sessionId,
+        limit,
+        ...(cursor ? { cursor } : {}),
+      });
+
+      const tasks: LongTaskSummary[] = taskRows.map((row) => ({
+        id: row.id,
+        ts: row.ts,
+        durationMs: row.durationMs,
+        attribution: row.attribution,
+        correlatedComponentNames: row.correlatedComponentNames,
+      }));
+
+      const lastTaskRow = taskRows[taskRows.length - 1];
+      const nextCursor: EventPageCursor | null =
+        taskRows.length === limit && lastTaskRow ? { ts: lastTaskRow.ts, id: lastTaskRow.id } : null;
+
+      return reply.send({ tasks, nextCursor });
+    },
+  );
+
+  app.get<{ Params: { sessionId: string }; Querystring: PerfEventsQuery }>(
+    '/api/sessions/:sessionId/network-requests',
+    async (request, reply) => {
+      const project = await authenticateRequest(pool, request);
+      if (!project) return reply.code(401).send({ error: 'invalid or missing API key' });
+
+      const limit = Math.min(Number(request.query.limit) || DEFAULT_EVENTS_PAGE_SIZE, 500);
+      const cursor = parseCursor(request.query);
+
+      const requestRows = await listNetworkRequestEvents(pool, {
+        sessionId: request.params.sessionId,
+        limit,
+        ...(cursor ? { cursor } : {}),
+      });
+
+      const requests: NetworkRequestSummary[] = requestRows.map((row) => ({
+        id: row.id,
+        ts: row.ts,
+        url: row.url,
+        method: row.method,
+        status: row.status,
+        durationMs: row.durationMs,
+        initiatorType: row.initiatorType,
+        transferSize: row.transferSize,
+      }));
+
+      const lastRequestRow = requestRows[requestRows.length - 1];
+      const nextCursor: EventPageCursor | null =
+        requestRows.length === limit && lastRequestRow
+          ? { ts: lastRequestRow.ts, id: lastRequestRow.id }
+          : null;
+
+      return reply.send({ requests, nextCursor });
     },
   );
 }

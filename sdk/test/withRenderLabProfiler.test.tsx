@@ -1,4 +1,4 @@
-// @vitest-environment jsdom
+
 import { describe, expect, it } from 'vitest';
 import { act, render } from '@testing-library/react';
 import type { PropDiffEntry, RenderEvent, TelemetryEvent } from '@renderlab/shared-types';
@@ -7,7 +7,6 @@ import { RenderLabRuntimeContext } from '../src/provider/context.js';
 import { resolveConfig } from '../src/config/defaultConfig.js';
 import type { RenderLabRuntime } from '../src/capture/runtime.js';
 
-/** Flushes the microtask queue `finalizeCommit` schedules its work on. */
 async function flushCapture(): Promise<void> {
   await act(async () => {
     await Promise.resolve();
@@ -30,6 +29,7 @@ function makeTestRuntime(): { runtime: RenderLabRuntime; events: RenderEvent[] }
       let n = 0;
       return () => (n += 1);
     })(),
+    stopObservers: () => {},
   };
   return { runtime, events };
 }
@@ -117,7 +117,7 @@ describe('withRenderLabProfiler — capture + diffing integration', () => {
     const parentUpdate = events.find((e) => e.componentName === 'Parent' && e.phase === 'update');
     const leafUpdate = events.find((e) => e.componentName === 'Leaf' && e.phase === 'update');
 
-    expect(parentUpdate?.renderReason).toBe('props-changed'); // label changed
-    expect(leafUpdate?.renderReason).toBe('parent-rerender'); // items reference unchanged
+    expect(parentUpdate?.renderReason).toBe('props-changed');
+    expect(leafUpdate?.renderReason).toBe('parent-rerender');
   });
 });

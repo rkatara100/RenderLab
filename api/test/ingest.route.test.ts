@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Pool } from 'pg';
-import type { RenderEvent } from '@renderlab/shared-types';
+import type { LongTaskEvent, NetworkRequestEvent, RenderEvent, TelemetryEvent } from '@renderlab/shared-types';
 import { buildServer } from '../src/server.js';
 import { createFakeRedis } from './fakes.js';
 
@@ -52,7 +52,39 @@ function makeRenderEvent(overrides: Partial<RenderEvent> = {}): RenderEvent {
   };
 }
 
-function makeBatchBody(events: RenderEvent[], batchId = 'batch-1') {
+function makeLongTaskEvent(overrides: Partial<LongTaskEvent> = {}): LongTaskEvent {
+  return {
+    type: 'long-task',
+    eventId: 'lt1',
+    sessionId: 'sdk-sess-1',
+    appId: 'app-1',
+    timestamp: Date.now(),
+    sequence: 1,
+    duration: 90,
+    attribution: ['script'],
+    ...overrides,
+  };
+}
+
+function makeNetworkRequestEvent(overrides: Partial<NetworkRequestEvent> = {}): NetworkRequestEvent {
+  return {
+    type: 'network-request',
+    eventId: 'nr1',
+    sessionId: 'sdk-sess-1',
+    appId: 'app-1',
+    timestamp: Date.now(),
+    sequence: 1,
+    url: 'https://api.example.com/data',
+    method: 'UNKNOWN',
+    duration: 42,
+    initiatorType: 'fetch',
+    status: 200,
+    transferSize: 1200,
+    ...overrides,
+  };
+}
+
+function makeBatchBody(events: TelemetryEvent[], batchId = 'batch-1') {
   return {
     batch_id: batchId,
     session: { sdk_session_key: 'sdk-sess-1', started_at: new Date().toISOString() },
@@ -90,7 +122,7 @@ describe('POST /api/ingest/events', () => {
 
     const insertCall = fakePool.calls.find((c) => c.text.includes('INSERT INTO render_events'));
     expect(insertCall).toBeDefined();
-    // reason codes: mount=1, parent-rerender=5; second row's is_avoidable=true and propsDiff serialized
+
     expect(insertCall?.params).toEqual(expect.arrayContaining([1, 5, true]));
   });
 
@@ -139,7 +171,7 @@ describe('POST /api/ingest/events', () => {
     });
 
     const insertCall = fakePool.calls.find((c) => c.text.includes('INSERT INTO render_events'));
-    // propsDiff and contextDiff params should both be null for this row
+
     const nullCount = insertCall?.params.filter((p) => p === null).length ?? 0;
     expect(nullCount).toBeGreaterThanOrEqual(2);
   });
@@ -167,6 +199,37 @@ describe('POST /api/ingest/events', () => {
     expect(second.statusCode).toBe(202);
     const insertCalls = fakePool.calls.filter((c) => c.text.includes('INSERT INTO render_events'));
     expect(insertCalls).toHaveLength(1);
+  });
+
+  it('persists long-task and network-request events alongside render events in one batch', async () => {
+    const fakePool = makeFakePool();
+    const app = buildServer({ pool: fakePool as unknown as Pool, redis: createFakeRedis() });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/ingest/events',
+      headers: { authorization: `Bearer ${API_KEY}` },
+      payload: makeBatchBody([
+        makeRenderEvent(),
+        makeLongTaskEvent({ duration: 88, attribution: ['layout'] }),
+        makeNetworkRequestEvent({ url: 'https://api.example.com/orders', status: 500 }),
+      ]),
+    });
+
+    expect(res.statusCode).toBe(202);
+    expect(res.json()).toMatchObject({ accepted: true, event_count: 3 });
+
+    const longTaskInsert = fakePool.calls.find((c) => c.text.includes('INSERT INTO long_task_events'));
+    expect(longTaskInsert?.params).toEqual(expect.arrayContaining([88, ['layout']]));
+
+    const networkInsert = fakePool.calls.find((c) =>
+      c.text.includes('INSERT INTO network_request_events'),
+    );
+    expect(networkInsert?.params).toEqual(
+      expect.arrayContaining(['https://api.example.com/orders', 500]),
+    );
+
+    expect(fakePool.calls.filter((c) => c.text.includes('INSERT INTO components'))).toHaveLength(1);
   });
 
   it('rejects a batch larger than the server-side cap with 413', async () => {

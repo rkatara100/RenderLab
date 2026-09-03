@@ -14,6 +14,16 @@ export interface RenderLabReplayConfig {
   captureStateHooks?: boolean;
 }
 
+export interface RenderLabLongTaskConfig {
+  enabled?: boolean;
+}
+
+export interface RenderLabNetworkConfig {
+  enabled?: boolean;
+
+  ignoreUrls?: Array<string | RegExp>;
+}
+
 export type PropCaptureMode = 'full' | 'redacted' | 'off';
 
 export interface RenderLabSDKError {
@@ -21,11 +31,6 @@ export interface RenderLabSDKError {
   cause?: unknown;
 }
 
-/**
- * Public SDK configuration. See ARCHITECTURE.md section 4.1 for defaults and
- * the reasoning behind each field (e.g. why props are redacted by default,
- * why sampling differs between dev and prod).
- */
 export interface RenderLabConfig {
   apiKey: string;
   environment?: string;
@@ -37,6 +42,8 @@ export interface RenderLabConfig {
   maxPropDepth?: number;
   maxPropStringLength?: number;
   replay?: RenderLabReplayConfig;
+  longTasks?: RenderLabLongTaskConfig;
+  network?: RenderLabNetworkConfig;
   transport?: 'fetch' | 'beacon';
   onError?: (error: RenderLabSDKError) => void;
   enabled?: boolean;

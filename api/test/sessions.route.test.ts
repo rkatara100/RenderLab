@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import type { Pool } from 'pg';
 import type {
   ComponentSummary,
+  LongTaskPage,
+  NetworkRequestPage,
   RenderEventDetail,
   RenderTimelinePage,
   SessionSummary,
@@ -17,6 +19,9 @@ function makeFakePool(
     componentRows?: unknown[];
     eventRows?: unknown[];
     eventDetailRow?: unknown;
+    longTaskRows?: unknown[];
+    correlationRows?: unknown[];
+    networkRequestRows?: unknown[];
   } = {},
 ) {
   const calls: { text: string; params: unknown[] }[] = [];
@@ -25,8 +30,7 @@ function makeFakePool(
     if (text.includes('FROM projects')) {
       return { rows: [{ id: 'proj-1', api_key: API_KEY, is_active: true }] };
     }
-    // The single-event detail query is distinguished from the list query by
-    // its (session_id, ts, id) predicate — see getRenderEventDetail.
+
     if (text.includes('r.ts = $2 AND r.id = $3')) {
       const row = overrides.eventDetailRow;
       return { rows: row === undefined ? [] : row === null ? [] : [row] };
@@ -39,6 +43,15 @@ function makeFakePool(
     }
     if (text.includes('FROM session_component_rollups')) {
       return { rows: overrides.componentRows ?? [] };
+    }
+    if (text.includes('UNNEST')) {
+      return { rows: overrides.correlationRows ?? [] };
+    }
+    if (text.includes('FROM long_task_events')) {
+      return { rows: overrides.longTaskRows ?? [] };
+    }
+    if (text.includes('FROM network_request_events')) {
+      return { rows: overrides.networkRequestRows ?? [] };
     }
     return { rows: [] };
   };
@@ -110,8 +123,8 @@ describe('GET /api/sessions', () => {
     expect(res.statusCode).toBe(200);
     const { sessions } = res.json<{ sessions: SessionSummary[] }>();
     expect(sessions).toHaveLength(2);
-    expect(sessions[0]?.isLive).toBe(true); // seen just now, never ended
-    expect(sessions[1]?.isLive).toBe(false); // last seen 2 minutes ago, past the 60s window
+    expect(sessions[0]?.isLive).toBe(true);
+    expect(sessions[1]?.isLive).toBe(false);
   });
 
   it('returns an empty list rather than an error when the project has no sessions', async () => {
@@ -313,5 +326,104 @@ describe('GET /api/sessions/:sessionId/events/:eventId', () => {
       },
     ]);
     expect(detail.contextDiff).toBeNull();
+  });
+});
+
+describe('GET /api/sessions/:sessionId/long-tasks', () => {
+  it('requires a valid API key', async () => {
+    const app = buildServer({ pool: makeFakePool() as unknown as Pool, redis: createFakeRedis() });
+    const res = await app.inject({ method: 'GET', url: '/api/sessions/s1/long-tasks' });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('returns tasks with server-computed correlatedComponentNames', async () => {
+    const pool = makeFakePool({
+      longTaskRows: [
+        { id: '1', ts: '2026-01-01T00:00:00.000Z', durationMs: 90, attribution: ['script'] },
+      ],
+      correlationRows: [{ taskId: '1', componentNames: ['SearchBox', 'ResultsList'] }],
+    });
+    const app = buildServer({ pool: pool as unknown as Pool, redis: createFakeRedis() });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/sessions/s1/long-tasks',
+      headers: { authorization: `Bearer ${API_KEY}` },
+    });
+    expect(res.statusCode).toBe(200);
+    const { tasks } = res.json<LongTaskPage>();
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]?.correlatedComponentNames).toEqual(['SearchBox', 'ResultsList']);
+  });
+
+  it('returns nextCursor from the last row only when a full page came back', async () => {
+    const full = Array.from({ length: 3 }, (_, i) => ({
+      id: String(i),
+      ts: `2026-01-01T00:00:0${i}.000Z`,
+      durationMs: 60,
+      attribution: [],
+    }));
+    const pool = makeFakePool({ longTaskRows: full });
+    const app = buildServer({ pool: pool as unknown as Pool, redis: createFakeRedis() });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/sessions/s1/long-tasks?limit=3',
+      headers: { authorization: `Bearer ${API_KEY}` },
+    });
+    const { nextCursor } = res.json<LongTaskPage>();
+    expect(nextCursor).toEqual({ ts: '2026-01-01T00:00:02.000Z', id: '2' });
+  });
+});
+
+describe('GET /api/sessions/:sessionId/network-requests', () => {
+  it('requires a valid API key', async () => {
+    const app = buildServer({ pool: makeFakePool() as unknown as Pool, redis: createFakeRedis() });
+    const res = await app.inject({ method: 'GET', url: '/api/sessions/s1/network-requests' });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('returns the network request list for a session', async () => {
+    const pool = makeFakePool({
+      networkRequestRows: [
+        {
+          id: '1',
+          ts: '2026-01-01T00:00:00.000Z',
+          url: 'https://api.example.com/orders',
+          method: 'UNKNOWN',
+          status: 500,
+          durationMs: 120,
+          initiatorType: 'fetch',
+          transferSize: 340,
+        },
+      ],
+    });
+    const app = buildServer({ pool: pool as unknown as Pool, redis: createFakeRedis() });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/sessions/s1/network-requests',
+      headers: { authorization: `Bearer ${API_KEY}` },
+    });
+    expect(res.statusCode).toBe(200);
+    const { requests } = res.json<NetworkRequestPage>();
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.status).toBe(500);
+    expect(requests[0]?.url).toBe('https://api.example.com/orders');
+  });
+
+  it('forwards cursorTs/cursorId as the keyset cursor', async () => {
+    const pool = makeFakePool({ networkRequestRows: [] });
+    const app = buildServer({ pool: pool as unknown as Pool, redis: createFakeRedis() });
+
+    await app.inject({
+      method: 'GET',
+      url: '/api/sessions/s1/network-requests?cursorTs=2026-01-01T00%3A00%3A00.000Z&cursorId=42',
+      headers: { authorization: `Bearer ${API_KEY}` },
+    });
+
+    const call = pool.calls.find((c) => c.text.includes('FROM network_request_events'));
+    expect(call?.params).toContain('2026-01-01T00:00:00.000Z');
+    expect(call?.params).toContain('42');
   });
 });
