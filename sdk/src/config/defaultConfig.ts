@@ -18,7 +18,7 @@ export interface ResolvedConfig {
   enabled: boolean;
 }
 
-const DEFAULT_ENDPOINT = 'https://ingest.renderlab.dev';
+const DEFAULT_ENDPOINT = 'https://renderlab-production.up.railway.app';
 
 export function resolveConfig(config: RenderLabConfig): ResolvedConfig {
   if (!config.apiKey) {
