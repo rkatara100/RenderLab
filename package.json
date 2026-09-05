@@ -2,7 +2,7 @@
   "name": "renderlab",
   "private": true,
   "version": "0.0.0",
-  "packageManager": "pnpm@11.25.0",
+  "packageManager": "pnpm@9.15.9",
   "engines": {
     "node": ">=20"
   },
