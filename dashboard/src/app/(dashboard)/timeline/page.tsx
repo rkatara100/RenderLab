@@ -5,11 +5,13 @@ import { useSessionEvents } from '../../../queries/useSessionEvents';
 import { useSessionsWithDefaultSelection } from '../../../queries/useSessionsWithDefaultSelection';
 import { useSessionSelectionStore } from '../../../stores/useSessionSelectionStore';
 import { useTimelineStore } from '../../../stores/useTimelineStore';
+import { useFilterStore, resolveTimeRange } from '../../../stores/useFilterStore';
 import { LoadingState } from '../../../components/shared/LoadingState';
 import { ErrorState } from '../../../components/shared/ErrorState';
 import { EmptyState } from '../../../components/shared/EmptyState';
 import { SessionPicker } from '../../../components/shared/SessionPicker';
 import { Timeline } from '../../../components/timeline/Timeline';
+import { TimelineFilterBar } from '../../../components/timeline/TimelineFilterBar';
 import { WhyDidItRenderPanel } from '../../../components/why-did-it-render/WhyDidItRenderPanel';
 
 export default function TimelinePage(): React.JSX.Element {
@@ -19,7 +21,15 @@ export default function TimelinePage(): React.JSX.Element {
   const selectedEvent = useTimelineStore((state) => state.selectedEvent);
   const selectEvent = useTimelineStore((state) => state.selectEvent);
 
-  const eventsQuery = useSessionEvents(selectedSessionId);
+  const searchQuery = useFilterStore((state) => state.searchQuery);
+  const renderReasonFilter = useFilterStore((state) => state.renderReasonFilter);
+  const timeRangePreset = useFilterStore((state) => state.timeRangePreset);
+
+  const eventsQuery = useSessionEvents(selectedSessionId, {
+    search: searchQuery,
+    renderReasons: renderReasonFilter,
+    ...resolveTimeRange(timeRangePreset),
+  });
   const events = useMemo(
     () => eventsQuery.data?.pages.flatMap((page) => page.events) ?? [],
     [eventsQuery.data],
@@ -54,6 +64,7 @@ export default function TimelinePage(): React.JSX.Element {
 
       {sessionsQuery.isSuccess && sessionsQuery.data.length > 0 ? (
         <>
+          <TimelineFilterBar />
           {eventsQuery.isLoading ? <LoadingState label="Loading render events…" /> : null}
           {eventsQuery.isError ? (
             <ErrorState

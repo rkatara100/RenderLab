@@ -6,6 +6,7 @@ import type {
   LongTaskSummary,
   NetworkRequestSummary,
   RenderEventDetail,
+  RenderReason,
   RenderTimelineEvent,
   ReplayEvent,
   SessionSummary,
@@ -20,11 +21,30 @@ import {
   listSessionComponents,
   listSessions,
 } from '../db/repository.js';
-import { codeToRenderReason } from './renderReasonCodes.js';
+import { codeToRenderReason, renderReasonToCode } from './renderReasonCodes.js';
 import { codeToPhase } from './eventPhaseCodes.js';
 import { checkRateLimit } from '../redis/rateLimit.js';
 import { redisKeys } from '../redis/keys.js';
 import type { RedisLike } from '../redis/hotPath.js';
+
+const VALID_RENDER_REASONS: RenderReason[] = [
+  'mount',
+  'props-changed',
+  'context-changed',
+  'state-changed',
+  'parent-rerender',
+  'unknown',
+];
+
+function parseRenderReasons(raw: string | undefined): number[] | undefined {
+  if (!raw) return undefined;
+  const codes = raw
+    .split(',')
+    .map((value) => value.trim())
+    .filter((value): value is RenderReason => VALID_RENDER_REASONS.includes(value as RenderReason))
+    .map(renderReasonToCode);
+  return codes.length > 0 ? codes : undefined;
+}
 
 function parseJsonColumn<T>(value: string | null): T | null {
   return value ? (JSON.parse(value) as T) : null;
@@ -52,6 +72,8 @@ interface EventsQuery {
   cursorTs?: string;
   cursorId?: string;
   avoidableOnly?: string;
+  search?: string;
+  renderReason?: string;
 }
 
 interface EventDetailQuery {
@@ -116,6 +138,8 @@ export function registerReadRoutes(app: FastifyInstance, deps: ReadRouteDeps): v
       const cursor: EventPageCursor | undefined =
         query.cursorTs && query.cursorId ? { ts: query.cursorTs, id: query.cursorId } : undefined;
 
+      const renderReasonCodes = parseRenderReasons(query.renderReason);
+
       const eventRows = await listRenderEvents(pool, {
         sessionId: request.params.sessionId,
         limit,
@@ -123,6 +147,8 @@ export function registerReadRoutes(app: FastifyInstance, deps: ReadRouteDeps): v
         ...(query.from ? { from: query.from } : {}),
         ...(query.to ? { to: query.to } : {}),
         ...(query.avoidableOnly === 'true' ? { avoidableOnly: true } : {}),
+        ...(query.search ? { search: query.search } : {}),
+        ...(renderReasonCodes ? { renderReasonCodes } : {}),
         ...(cursor ? { cursor } : {}),
       });
 

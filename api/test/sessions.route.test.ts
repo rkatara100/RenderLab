@@ -247,6 +247,50 @@ describe('GET /api/sessions/:sessionId/events', () => {
     const eventsCall = pool.calls.find((c) => c.text.includes('FROM render_events'));
     expect(eventsCall?.text).toContain('r.is_avoidable = true');
   });
+
+  it('forwards search to the ILIKE filter', async () => {
+    const pool = createPool({ eventRows: [] });
+    const app = buildServer({ pool: pool as unknown as Pool, redis: createTestRedis() });
+
+    await app.inject({
+      method: 'GET',
+      url: '/api/sessions/s1/events?search=SearchBox',
+      headers: { authorization: `Bearer ${API_KEY}` },
+    });
+
+    const eventsCall = pool.calls.find((c) => c.text.includes('FROM render_events'));
+    expect(eventsCall?.text).toContain('c.display_name ILIKE');
+    expect(eventsCall?.params).toContain('%SearchBox%');
+  });
+
+  it('parses a comma-separated renderReason list into codes for the ANY filter', async () => {
+    const pool = createPool({ eventRows: [] });
+    const app = buildServer({ pool: pool as unknown as Pool, redis: createTestRedis() });
+
+    await app.inject({
+      method: 'GET',
+      url: '/api/sessions/s1/events?renderReason=props-changed,parent-rerender',
+      headers: { authorization: `Bearer ${API_KEY}` },
+    });
+
+    const eventsCall = pool.calls.find((c) => c.text.includes('FROM render_events'));
+    expect(eventsCall?.text).toContain('= ANY');
+    expect(eventsCall?.params).toContainEqual([2, 5]);
+  });
+
+  it('silently drops unknown renderReason values instead of applying the filter', async () => {
+    const pool = createPool({ eventRows: [] });
+    const app = buildServer({ pool: pool as unknown as Pool, redis: createTestRedis() });
+
+    await app.inject({
+      method: 'GET',
+      url: '/api/sessions/s1/events?renderReason=not-a-real-reason',
+      headers: { authorization: `Bearer ${API_KEY}` },
+    });
+
+    const eventsCall = pool.calls.find((c) => c.text.includes('FROM render_events'));
+    expect(eventsCall?.text).not.toContain('= ANY');
+  });
 });
 
 describe('GET /api/sessions/:sessionId/events/:eventId', () => {
