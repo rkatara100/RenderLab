@@ -259,6 +259,31 @@ describe('listReplayEvents', () => {
     await listReplayEvents(pool as unknown as Pool, { sessionId: 's1', limit: 2001 });
     expect(pool.calls[0]?.params).toEqual(['s1', 2001]);
   });
+
+  it('filters by component name via a wildcard-wrapped ILIKE', async () => {
+    const pool = createTestPool();
+    await listRenderEvents(pool as unknown as Pool, { sessionId: 's1', search: 'SearchBox' });
+    const { text, params } = pool.calls[0]!;
+    expect(text).toContain('c.display_name ILIKE $2');
+    expect(params).toEqual(['s1', '%SearchBox%']);
+  });
+
+  it('filters by render reason codes via = ANY, not by string', async () => {
+    const pool = createTestPool();
+    await listRenderEvents(pool as unknown as Pool, {
+      sessionId: 's1',
+      renderReasonCodes: [2, 5],
+    });
+    const { text, params } = pool.calls[0]!;
+    expect(text).toContain('r.render_reason = ANY($2::smallint[])');
+    expect(params).toEqual(['s1', [2, 5]]);
+  });
+
+  it('ignores an empty renderReasonCodes array (no filter applied)', async () => {
+    const pool = createTestPool();
+    await listRenderEvents(pool as unknown as Pool, { sessionId: 's1', renderReasonCodes: [] });
+    expect(pool.calls[0]?.text).not.toContain('= ANY');
+  });
 });
 
 describe('insertLongTaskEvents', () => {

@@ -194,6 +194,8 @@ export interface ListRenderEventsParams {
   to?: string;
 
   avoidableOnly?: boolean;
+  search?: string;
+  renderReasonCodes?: number[];
 }
 
 export async function listRenderEvents(
@@ -218,6 +220,14 @@ export async function listRenderEvents(
   }
   if (params.avoidableOnly) {
     conditions.push('r.is_avoidable = true');
+  }
+  if (params.search) {
+    values.push(`%${params.search}%`);
+    conditions.push(`c.display_name ILIKE $${values.length}`);
+  }
+  if (params.renderReasonCodes && params.renderReasonCodes.length > 0) {
+    values.push(params.renderReasonCodes);
+    conditions.push(`r.render_reason = ANY($${values.length}::smallint[])`);
   }
   if (params.cursor) {
     values.push(params.cursor.ts, params.cursor.id);
