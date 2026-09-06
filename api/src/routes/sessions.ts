@@ -46,8 +46,23 @@ function parseRenderReasons(raw: string | undefined): number[] | undefined {
   return codes.length > 0 ? codes : undefined;
 }
 
-function parseJsonColumn<T>(value: string | null): T | null {
-  return value ? (JSON.parse(value) as T) : null;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isValidUuid(value: string): boolean {
+  return UUID_PATTERN.test(value);
+}
+
+function parseLimit(raw: string | undefined, fallback: number, cap: number): number | null {
+  if (raw === undefined) return fallback;
+  if (!/^\d+$/.test(raw)) return null;
+  const value = Number(raw);
+  return Math.min(value, cap);
+}
+
+function parseComponentId(raw: string | undefined): number | null | undefined {
+  if (raw === undefined) return undefined;
+  if (!/^\d+$/.test(raw)) return null;
+  return Number(raw);
 }
 
 const LIVE_WINDOW_MS = 60_000;
@@ -63,6 +78,18 @@ const REPLAY_RATE_LIMIT = Number(process.env.REPLAY_RATE_LIMIT_MAX ?? 30);
 const REPLAY_RATE_LIMIT_WINDOW_SECONDS = Number(
   process.env.REPLAY_RATE_LIMIT_WINDOW_SECONDS ?? 60,
 );
+
+const READ_RATE_LIMIT = Number(process.env.READ_RATE_LIMIT_MAX ?? 120);
+const READ_RATE_LIMIT_WINDOW_SECONDS = Number(process.env.READ_RATE_LIMIT_WINDOW_SECONDS ?? 60);
+
+async function checkReadRateLimit(redis: RedisLike, projectId: string) {
+  return checkRateLimit(
+    redis,
+    redisKeys.rateLimitRead(projectId),
+    READ_RATE_LIMIT,
+    READ_RATE_LIMIT_WINDOW_SECONDS,
+  );
+}
 
 interface EventsQuery {
   limit?: string;
@@ -104,6 +131,14 @@ export function registerReadRoutes(app: FastifyInstance, deps: ReadRouteDeps): v
     const project = await authenticateRequest(pool, request);
     if (!project) return reply.code(401).send({ error: 'invalid or missing API key' });
 
+    const rateLimit = await checkReadRateLimit(redis, project.id);
+    if (!rateLimit.allowed) {
+      return reply
+        .code(429)
+        .header('Retry-After', rateLimit.retryAfterSeconds)
+        .send({ error: 'rate limit exceeded, try again later' });
+    }
+
     const sessionRows = await listSessions(pool, project.id);
     const sessions: SessionSummary[] = sessionRows.map((session) => ({
       ...session,
@@ -117,6 +152,17 @@ export function registerReadRoutes(app: FastifyInstance, deps: ReadRouteDeps): v
     async (request, reply) => {
       const project = await authenticateRequest(pool, request);
       if (!project) return reply.code(401).send({ error: 'invalid or missing API key' });
+      if (!isValidUuid(request.params.sessionId)) {
+        return reply.code(422).send({ error: 'sessionId must be a valid UUID' });
+      }
+
+      const rateLimit = await checkReadRateLimit(redis, project.id);
+      if (!rateLimit.allowed) {
+        return reply
+          .code(429)
+          .header('Retry-After', rateLimit.retryAfterSeconds)
+          .send({ error: 'rate limit exceeded, try again later' });
+      }
 
       const components: ComponentSummary[] = await listSessionComponents(
         pool,
@@ -132,9 +178,27 @@ export function registerReadRoutes(app: FastifyInstance, deps: ReadRouteDeps): v
     async (request, reply) => {
       const project = await authenticateRequest(pool, request);
       if (!project) return reply.code(401).send({ error: 'invalid or missing API key' });
+      if (!isValidUuid(request.params.sessionId)) {
+        return reply.code(422).send({ error: 'sessionId must be a valid UUID' });
+      }
+
+      const rateLimit = await checkReadRateLimit(redis, project.id);
+      if (!rateLimit.allowed) {
+        return reply
+          .code(429)
+          .header('Retry-After', rateLimit.retryAfterSeconds)
+          .send({ error: 'rate limit exceeded, try again later' });
+      }
 
       const query = request.query;
-      const limit = Math.min(Number(query.limit) || DEFAULT_EVENTS_PAGE_SIZE, 500);
+      const limit = parseLimit(query.limit, DEFAULT_EVENTS_PAGE_SIZE, 500);
+      if (limit === null) {
+        return reply.code(422).send({ error: 'limit must be a non-negative integer' });
+      }
+      const componentId = parseComponentId(query.componentId);
+      if (componentId === null) {
+        return reply.code(422).send({ error: 'componentId must be an integer' });
+      }
       const cursor: EventPageCursor | undefined =
         query.cursorTs && query.cursorId ? { ts: query.cursorTs, id: query.cursorId } : undefined;
 
@@ -142,8 +206,9 @@ export function registerReadRoutes(app: FastifyInstance, deps: ReadRouteDeps): v
 
       const eventRows = await listRenderEvents(pool, {
         sessionId: request.params.sessionId,
+        projectId: project.id,
         limit,
-        ...(query.componentId ? { componentId: Number(query.componentId) } : {}),
+        ...(componentId !== undefined ? { componentId } : {}),
         ...(query.from ? { from: query.from } : {}),
         ...(query.to ? { to: query.to } : {}),
         ...(query.avoidableOnly === 'true' ? { avoidableOnly: true } : {}),
@@ -177,6 +242,9 @@ export function registerReadRoutes(app: FastifyInstance, deps: ReadRouteDeps): v
     async (request, reply) => {
       const project = await authenticateRequest(pool, request);
       if (!project) return reply.code(401).send({ error: 'invalid or missing API key' });
+      if (!isValidUuid(request.params.sessionId)) {
+        return reply.code(422).send({ error: 'sessionId must be a valid UUID' });
+      }
 
       const rateLimit = await checkRateLimit(
         redis,
@@ -193,6 +261,7 @@ export function registerReadRoutes(app: FastifyInstance, deps: ReadRouteDeps): v
 
       const eventRows = await listReplayEvents(pool, {
         sessionId: request.params.sessionId,
+        projectId: project.id,
         limit: REPLAY_EVENT_CAP + 1,
       });
       const truncated = eventRows.length > REPLAY_EVENT_CAP;
@@ -220,8 +289,19 @@ export function registerReadRoutes(app: FastifyInstance, deps: ReadRouteDeps): v
     async (request, reply) => {
       const project = await authenticateRequest(pool, request);
       if (!project) return reply.code(401).send({ error: 'invalid or missing API key' });
+      if (!isValidUuid(request.params.sessionId)) {
+        return reply.code(422).send({ error: 'sessionId must be a valid UUID' });
+      }
       if (!request.query.ts) {
         return reply.code(422).send({ error: 'ts query parameter is required' });
+      }
+
+      const rateLimit = await checkReadRateLimit(redis, project.id);
+      if (!rateLimit.allowed) {
+        return reply
+          .code(429)
+          .header('Retry-After', rateLimit.retryAfterSeconds)
+          .send({ error: 'rate limit exceeded, try again later' });
       }
 
       const row = await getRenderEventDetail(
@@ -242,8 +322,8 @@ export function registerReadRoutes(app: FastifyInstance, deps: ReadRouteDeps): v
         componentId: row.componentId,
         componentName: row.componentName,
         reasonDetail: row.reasonDetail,
-        propsDiff: parseJsonColumn<RenderEventDetail['propsDiff']>(row.propsDiff),
-        contextDiff: parseJsonColumn<RenderEventDetail['contextDiff']>(row.contextDiff),
+        propsDiff: row.propsDiff,
+        contextDiff: row.contextDiff,
       };
       return reply.send(detail);
     },
@@ -254,12 +334,27 @@ export function registerReadRoutes(app: FastifyInstance, deps: ReadRouteDeps): v
     async (request, reply) => {
       const project = await authenticateRequest(pool, request);
       if (!project) return reply.code(401).send({ error: 'invalid or missing API key' });
+      if (!isValidUuid(request.params.sessionId)) {
+        return reply.code(422).send({ error: 'sessionId must be a valid UUID' });
+      }
 
-      const limit = Math.min(Number(request.query.limit) || DEFAULT_EVENTS_PAGE_SIZE, 500);
+      const rateLimit = await checkReadRateLimit(redis, project.id);
+      if (!rateLimit.allowed) {
+        return reply
+          .code(429)
+          .header('Retry-After', rateLimit.retryAfterSeconds)
+          .send({ error: 'rate limit exceeded, try again later' });
+      }
+
+      const limit = parseLimit(request.query.limit, DEFAULT_EVENTS_PAGE_SIZE, 500);
+      if (limit === null) {
+        return reply.code(422).send({ error: 'limit must be a non-negative integer' });
+      }
       const cursor = parseCursor(request.query);
 
       const taskRows = await listLongTaskEvents(pool, {
         sessionId: request.params.sessionId,
+        projectId: project.id,
         limit,
         ...(cursor ? { cursor } : {}),
       });
@@ -285,12 +380,27 @@ export function registerReadRoutes(app: FastifyInstance, deps: ReadRouteDeps): v
     async (request, reply) => {
       const project = await authenticateRequest(pool, request);
       if (!project) return reply.code(401).send({ error: 'invalid or missing API key' });
+      if (!isValidUuid(request.params.sessionId)) {
+        return reply.code(422).send({ error: 'sessionId must be a valid UUID' });
+      }
 
-      const limit = Math.min(Number(request.query.limit) || DEFAULT_EVENTS_PAGE_SIZE, 500);
+      const rateLimit = await checkReadRateLimit(redis, project.id);
+      if (!rateLimit.allowed) {
+        return reply
+          .code(429)
+          .header('Retry-After', rateLimit.retryAfterSeconds)
+          .send({ error: 'rate limit exceeded, try again later' });
+      }
+
+      const limit = parseLimit(request.query.limit, DEFAULT_EVENTS_PAGE_SIZE, 500);
+      if (limit === null) {
+        return reply.code(422).send({ error: 'limit must be a non-negative integer' });
+      }
       const cursor = parseCursor(request.query);
 
       const requestRows = await listNetworkRequestEvents(pool, {
         sessionId: request.params.sessionId,
+        projectId: project.id,
         limit,
         ...(cursor ? { cursor } : {}),
       });

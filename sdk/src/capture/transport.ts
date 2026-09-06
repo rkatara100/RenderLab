@@ -11,11 +11,11 @@ export interface SessionRef {
   startedAt: number;
 }
 
-export function sendBatch(
+export async function sendBatch(
   events: TelemetryEvent[],
   session: SessionRef,
   options: TransportOptions,
-): void {
+): Promise<void> {
   const body = JSON.stringify({
     batch_id: crypto.randomUUID(),
     session: {
@@ -27,14 +27,18 @@ export function sendBatch(
   const url = `${options.endpoint}/api/ingest/events`;
 
   if (options.mode === 'beacon' && typeof navigator !== 'undefined' && navigator.sendBeacon) {
-    navigator.sendBeacon(url, body);
+    const queued = navigator.sendBeacon(url, body);
+    if (!queued) throw new Error('RenderLab: sendBeacon was rejected by the browser');
     return;
   }
 
-  void fetch(url, {
+  const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${options.apiKey}` },
     body,
     keepalive: true,
-  }).catch(() => {});
+  });
+  if (!response.ok) {
+    throw new Error(`RenderLab: ingest request failed with status ${response.status}`);
+  }
 }

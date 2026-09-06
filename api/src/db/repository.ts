@@ -1,5 +1,15 @@
 import { randomBytes } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
+import type { ContextDiffEntry, PropDiffEntry } from '@renderlab/shared-types';
+import { ensureDailyPartition } from './partitions.js';
+
+const NO_PARTITION_ERROR_CODE = '23514';
+
+function isNoPartitionError(error: unknown): boolean {
+  return (
+    typeof error === 'object' && error !== null && 'code' in error && error.code === NO_PARTITION_ERROR_CODE
+  );
+}
 
 export interface Project {
   id: string;
@@ -163,11 +173,19 @@ export async function insertRenderEvents(
     );
   });
 
-  await pool.query(
-    `INSERT INTO render_events (${RENDER_EVENT_COLUMNS.join(', ')})
-     VALUES ${tuples.join(', ')}`,
-    values,
-  );
+  const sql = `INSERT INTO render_events (${RENDER_EVENT_COLUMNS.join(', ')}) VALUES ${tuples.join(', ')}`;
+
+  try {
+    await pool.query(sql, values);
+  } catch (error) {
+    if (!isNoPartitionError(error)) throw error;
+
+    const dates = new Set(rows.map((row) => row.ts.slice(0, 10)));
+    for (const date of dates) {
+      await ensureDailyPartition(pool, new Date(`${date}T00:00:00.000Z`));
+    }
+    await pool.query(sql, values);
+  }
 }
 
 export interface RenderEventPageRow {
@@ -187,6 +205,7 @@ export interface PageCursor {
 
 export interface ListRenderEventsParams {
   sessionId: string;
+  projectId: string;
   componentId?: number;
   cursor?: PageCursor;
   limit?: number;
@@ -203,8 +222,8 @@ export async function listRenderEvents(
   params: ListRenderEventsParams,
 ): Promise<RenderEventPageRow[]> {
   const limit = Math.min(params.limit ?? 100, 500);
-  const conditions = ['r.session_id = $1'];
-  const values: unknown[] = [params.sessionId];
+  const conditions = ['r.session_id = $1', 's.project_id = $2'];
+  const values: unknown[] = [params.sessionId, params.projectId];
 
   if (params.componentId !== undefined) {
     values.push(params.componentId);
@@ -239,6 +258,7 @@ export async function listRenderEvents(
             r.is_avoidable AS "isAvoidable", r.component_id AS "componentId", c.display_name AS "componentName"
      FROM render_events r
      JOIN components c ON c.id = r.component_id
+     JOIN sessions s ON s.id = r.session_id
      WHERE ${conditions.join(' AND ')}
      ORDER BY r.ts DESC, r.id DESC
      LIMIT ${limit}`,
@@ -262,6 +282,7 @@ export interface ReplayEventPageRow {
 
 export interface ListReplayEventsParams {
   sessionId: string;
+  projectId: string;
   limit: number;
 }
 
@@ -275,10 +296,11 @@ export async function listReplayEvents(
             r.phase, r.commit_time AS "commitTime", r.component_path AS "componentPath"
      FROM render_events r
      JOIN components c ON c.id = r.component_id
-     WHERE r.session_id = $1
+     JOIN sessions s ON s.id = r.session_id
+     WHERE r.session_id = $1 AND s.project_id = $2
      ORDER BY r.ts ASC, r.id ASC
-     LIMIT $2`,
-    [params.sessionId, params.limit],
+     LIMIT $3`,
+    [params.sessionId, params.projectId, params.limit],
   );
   return rows;
 }
@@ -292,8 +314,8 @@ export interface RenderEventDetailRow {
   componentId: number;
   componentName: string;
   reasonDetail: string | null;
-  propsDiff: string | null;
-  contextDiff: string | null;
+  propsDiff: PropDiffEntry[] | null;
+  contextDiff: ContextDiffEntry[] | null;
 }
 
 export async function getRenderEventDetail(
@@ -322,6 +344,7 @@ export interface RollupUpdate {
   renderCount: number;
   avoidableCount: number;
   totalDurationMs: number;
+  maxDurationMs: number;
   lastRenderAt: string;
 }
 
@@ -331,11 +354,12 @@ export async function upsertSessionComponentRollup(
 ): Promise<void> {
   await pool.query(
     `INSERT INTO session_component_rollups (session_id, component_id, render_count, avoidable_count, total_duration_ms, max_duration_ms, last_render_at)
-     VALUES ($1, $2, $3, $4, $5, 0, $6)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
      ON CONFLICT (session_id, component_id) DO UPDATE SET
        render_count = session_component_rollups.render_count + EXCLUDED.render_count,
        avoidable_count = session_component_rollups.avoidable_count + EXCLUDED.avoidable_count,
        total_duration_ms = session_component_rollups.total_duration_ms + EXCLUDED.total_duration_ms,
+       max_duration_ms = GREATEST(session_component_rollups.max_duration_ms, EXCLUDED.max_duration_ms),
        last_render_at = GREATEST(session_component_rollups.last_render_at, EXCLUDED.last_render_at)`,
     [
       rollup.sessionId,
@@ -343,6 +367,7 @@ export async function upsertSessionComponentRollup(
       rollup.renderCount,
       rollup.avoidableCount,
       rollup.totalDurationMs,
+      rollup.maxDurationMs,
       rollup.lastRenderAt,
     ],
   );
@@ -524,6 +549,7 @@ export interface LongTaskEventPageRow {
 
 export interface ListLongTaskEventsParams {
   sessionId: string;
+  projectId: string;
   cursor?: PageCursor;
   limit?: number;
 }
@@ -562,12 +588,12 @@ export async function listLongTaskEvents(
   params: ListLongTaskEventsParams,
 ): Promise<LongTaskEventPageRow[]> {
   const limit = Math.min(params.limit ?? 100, 500);
-  const conditions = ['session_id = $1'];
-  const values: unknown[] = [params.sessionId];
+  const conditions = ['lt.session_id = $1', 's.project_id = $2'];
+  const values: unknown[] = [params.sessionId, params.projectId];
 
   if (params.cursor) {
     values.push(params.cursor.ts, params.cursor.id);
-    conditions.push(`(ts, id) < ($${values.length - 1}, $${values.length})`);
+    conditions.push(`(lt.ts, lt.id) < ($${values.length - 1}, $${values.length})`);
   }
 
   const { rows } = await pool.query<{
@@ -576,10 +602,11 @@ export async function listLongTaskEvents(
     durationMs: number;
     attribution: string[];
   }>(
-    `SELECT id, ts, duration_ms AS "durationMs", attribution
-     FROM long_task_events
+    `SELECT lt.id, lt.ts, lt.duration_ms AS "durationMs", lt.attribution
+     FROM long_task_events lt
+     JOIN sessions s ON s.id = lt.session_id
      WHERE ${conditions.join(' AND ')}
-     ORDER BY ts DESC, id DESC
+     ORDER BY lt.ts DESC, lt.id DESC
      LIMIT ${limit}`,
     values,
   );
@@ -605,6 +632,7 @@ export interface NetworkRequestEventPageRow {
 
 export interface ListNetworkRequestEventsParams {
   sessionId: string;
+  projectId: string;
   cursor?: PageCursor;
   limit?: number;
 }
@@ -614,20 +642,21 @@ export async function listNetworkRequestEvents(
   params: ListNetworkRequestEventsParams,
 ): Promise<NetworkRequestEventPageRow[]> {
   const limit = Math.min(params.limit ?? 100, 500);
-  const conditions = ['session_id = $1'];
-  const values: unknown[] = [params.sessionId];
+  const conditions = ['nr.session_id = $1', 's.project_id = $2'];
+  const values: unknown[] = [params.sessionId, params.projectId];
 
   if (params.cursor) {
     values.push(params.cursor.ts, params.cursor.id);
-    conditions.push(`(ts, id) < ($${values.length - 1}, $${values.length})`);
+    conditions.push(`(nr.ts, nr.id) < ($${values.length - 1}, $${values.length})`);
   }
 
   const { rows } = await pool.query<NetworkRequestEventPageRow>(
-    `SELECT id, ts, url, method, status, duration_ms AS "durationMs",
-            initiator_type AS "initiatorType", transfer_size AS "transferSize"
-     FROM network_request_events
+    `SELECT nr.id, nr.ts, nr.url, nr.method, nr.status, nr.duration_ms AS "durationMs",
+            nr.initiator_type AS "initiatorType", nr.transfer_size AS "transferSize"
+     FROM network_request_events nr
+     JOIN sessions s ON s.id = nr.session_id
      WHERE ${conditions.join(' AND ')}
-     ORDER BY ts DESC, id DESC
+     ORDER BY nr.ts DESC, nr.id DESC
      LIMIT ${limit}`,
     values,
   );

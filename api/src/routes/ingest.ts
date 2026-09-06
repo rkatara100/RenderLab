@@ -20,6 +20,7 @@ import {
 } from '../db/repository.js';
 import { flushSessionRollup } from '../redis/flushJob.js';
 import {
+  clearDuplicateMarker,
   isDuplicateBatch,
   recordBatchHotPath,
   type HotPathEvent,
@@ -111,77 +112,82 @@ export function registerIngestRoutes(app: FastifyInstance, deps: IngestRouteDeps
         .send({ accepted: true, batch_id: body.batch_id, event_count: body.events.length });
     }
 
-    const sessionId = await upsertSession(pool, {
-      projectId: project.id,
-      sdkSessionKey: body.session.sdk_session_key,
-      startedAt: body.session.started_at,
-      url: body.session.url,
-      userAgent: body.session.user_agent,
-      appVersion: body.session.app_version,
-    });
-
-    const renderEvents = body.events.filter(isRenderEvent);
-
-    const componentIdByName = new Map<string, number>();
-    for (const name of new Set(renderEvents.map((e) => e.componentName))) {
-      componentIdByName.set(name, await upsertComponent(pool, project.id, name));
-    }
-
-    const rows: RenderEventRow[] = [];
-    const hotPathBatch: HotPathEvent[] = [];
-    for (const event of renderEvents) {
-      const componentId = componentIdByName.get(event.componentName);
-      if (componentId === undefined) continue;
-      const isAvoidable = isAvoidableRender(event.renderReason);
-
-      rows.push({
-        sessionId,
-        componentId,
-        ts: new Date(event.timestamp).toISOString(),
-        durationMs: event.actualDuration,
-        renderReason: renderReasonToCode(event.renderReason),
-        isAvoidable,
-        reasonDetail: event.reasonDetail ?? null,
-        propsDiff: shouldPersistPropsDiff(event.renderReason)
-          ? JSON.stringify(event.propsDiff)
-          : null,
-        contextDiff:
-          shouldPersistContextDiff(event.renderReason) && event.contextDiff
-            ? JSON.stringify(event.contextDiff)
-            : null,
-        phase: phaseToCode(event.phase),
-        componentPath: event.componentPath,
-        commitTime: event.commitTime,
+    try {
+      const sessionId = await upsertSession(pool, {
+        projectId: project.id,
+        sdkSessionKey: body.session.sdk_session_key,
+        startedAt: body.session.started_at,
+        url: body.session.url,
+        userAgent: body.session.user_agent,
+        appVersion: body.session.app_version,
       });
-      hotPathBatch.push({ componentId, durationMs: event.actualDuration, isAvoidable });
-    }
 
-    await insertRenderEvents(pool, project.id, rows);
-    await recordBatchHotPath(redis, project.id, sessionId, hotPathBatch);
+      const renderEvents = body.events.filter(isRenderEvent);
 
-    await flushSessionRollup(pool, redis, project.id, sessionId);
+      const componentIdByName = new Map<string, number>();
+      for (const name of new Set(renderEvents.map((e) => e.componentName))) {
+        componentIdByName.set(name, await upsertComponent(pool, project.id, name));
+      }
 
-    const longTaskRows: LongTaskEventRow[] = body.events.filter(isLongTaskEvent).map((event) => ({
-      sessionId,
-      ts: new Date(event.timestamp).toISOString(),
-      durationMs: event.duration,
-      attribution: event.attribution,
-    }));
-    await insertLongTaskEvents(pool, project.id, longTaskRows);
+      const rows: RenderEventRow[] = [];
+      const hotPathBatch: HotPathEvent[] = [];
+      for (const event of renderEvents) {
+        const componentId = componentIdByName.get(event.componentName);
+        if (componentId === undefined) continue;
+        const isAvoidable = isAvoidableRender(event.renderReason);
 
-    const networkRequestRows: NetworkRequestEventRow[] = body.events
-      .filter(isNetworkRequestEvent)
-      .map((event) => ({
+        rows.push({
+          sessionId,
+          componentId,
+          ts: new Date(event.timestamp).toISOString(),
+          durationMs: event.actualDuration,
+          renderReason: renderReasonToCode(event.renderReason),
+          isAvoidable,
+          reasonDetail: event.reasonDetail ?? null,
+          propsDiff: shouldPersistPropsDiff(event.renderReason)
+            ? JSON.stringify(event.propsDiff)
+            : null,
+          contextDiff:
+            shouldPersistContextDiff(event.renderReason) && event.contextDiff
+              ? JSON.stringify(event.contextDiff)
+              : null,
+          phase: phaseToCode(event.phase),
+          componentPath: event.componentPath,
+          commitTime: event.commitTime,
+        });
+        hotPathBatch.push({ componentId, durationMs: event.actualDuration, isAvoidable });
+      }
+
+      await insertRenderEvents(pool, project.id, rows);
+      await recordBatchHotPath(redis, project.id, sessionId, hotPathBatch);
+
+      await flushSessionRollup(pool, redis, project.id, sessionId);
+
+      const longTaskRows: LongTaskEventRow[] = body.events.filter(isLongTaskEvent).map((event) => ({
         sessionId,
         ts: new Date(event.timestamp).toISOString(),
-        url: event.url,
-        method: event.method,
-        status: event.status ?? null,
         durationMs: event.duration,
-        initiatorType: event.initiatorType,
-        transferSize: event.transferSize ?? null,
+        attribution: event.attribution,
       }));
-    await insertNetworkRequestEvents(pool, project.id, networkRequestRows);
+      await insertLongTaskEvents(pool, project.id, longTaskRows);
+
+      const networkRequestRows: NetworkRequestEventRow[] = body.events
+        .filter(isNetworkRequestEvent)
+        .map((event) => ({
+          sessionId,
+          ts: new Date(event.timestamp).toISOString(),
+          url: event.url,
+          method: event.method,
+          status: event.status ?? null,
+          durationMs: event.duration,
+          initiatorType: event.initiatorType,
+          transferSize: event.transferSize ?? null,
+        }));
+      await insertNetworkRequestEvents(pool, project.id, networkRequestRows);
+    } catch (error) {
+      await clearDuplicateMarker(redis, project.id, body.batch_id);
+      throw error;
+    }
 
     return reply
       .code(202)

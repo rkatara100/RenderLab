@@ -101,6 +101,25 @@ describe('BatchQueue', () => {
     expect(flushed.map((e) => e.eventId)).toContain('third');
   });
 
+  it('drain() returns buffered events without invoking onFlush', () => {
+    const onFlush = vi.fn();
+    const queue = new BatchQueue({
+      maxSize: 250,
+      flushIntervalMs: 100_000,
+      maxQueueBytes: 1_000_000,
+      onFlush,
+    });
+
+    queue.enqueue(makeEvent({ eventId: 'a' }));
+    queue.enqueue(makeEvent({ eventId: 'b' }));
+    const drained = queue.drain();
+
+    expect(drained.map((e) => e.eventId)).toEqual(['a', 'b']);
+    expect(onFlush).not.toHaveBeenCalled();
+    expect(queue.size).toBe(0);
+    queue.destroy();
+  });
+
   it('destroy() flushes any remaining buffered events and stops the timer', () => {
     const onFlush = vi.fn();
     const queue = new BatchQueue({

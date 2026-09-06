@@ -13,6 +13,7 @@ export async function flushSessionRollup(
   const durationKey = redisKeys.componentDurationMs(projectId, sessionId);
   const avoidableKey = redisKeys.componentAvoidableCounts(projectId, sessionId);
   const avoidableDurationKey = redisKeys.componentAvoidableDurationMs(projectId, sessionId);
+  const maxDurationKey = redisKeys.componentMaxDurationMs(projectId, sessionId);
 
   const counts = await redis.hgetall(countsKey);
   if (!counts || Object.keys(counts).length === 0) return;
@@ -20,8 +21,9 @@ export async function flushSessionRollup(
   const durations = await redis.hgetall(durationKey);
   const avoidables = await redis.hgetall(avoidableKey);
   const avoidableDurations = await redis.hgetall(avoidableDurationKey);
+  const maxDurations = await redis.hgetall(maxDurationKey);
 
-  await redis.del(countsKey, durationKey, avoidableKey, avoidableDurationKey);
+  await redis.del(countsKey, durationKey, avoidableKey, avoidableDurationKey, maxDurationKey);
 
   let totalRenders = 0;
   let totalWastedMs = 0;
@@ -33,6 +35,7 @@ export async function flushSessionRollup(
     const avoidableCount = Number(avoidables?.[componentIdStr] ?? 0);
 
     const avoidableDurationMs = Number(avoidableDurations?.[componentIdStr] ?? 0) / 1000;
+    const maxDurationMs = Number(maxDurations?.[componentIdStr] ?? 0) / 1000;
 
     await upsertSessionComponentRollup(pool, {
       sessionId,
@@ -40,6 +43,7 @@ export async function flushSessionRollup(
       renderCount,
       avoidableCount,
       totalDurationMs,
+      maxDurationMs,
       lastRenderAt: now,
     });
 

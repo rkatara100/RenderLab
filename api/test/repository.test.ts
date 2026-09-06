@@ -13,6 +13,7 @@ import {
   listSessions,
   upsertComponent,
   upsertSession,
+  upsertSessionComponentRollup,
 } from '../src/db/repository.js';
 import { createTestPool } from './doubles.js';
 import type { Pool } from 'pg';
@@ -144,6 +145,71 @@ describe('insertRenderEvents', () => {
       20.25,
     ]);
   });
+
+  it('self-heals on a missing-partition error: creates the partition and retries once', async () => {
+    const calls: { text: string; params: unknown[] }[] = [];
+    let failInsert = true;
+    const query = async (text: string, params: unknown[] = []) => {
+      calls.push({ text, params });
+      if (text.includes('INSERT INTO render_events') && failInsert) {
+        failInsert = false;
+        const error = new Error('no partition of relation "render_events" found for row') as Error & {
+          code: string;
+        };
+        error.code = '23514';
+        throw error;
+      }
+      return { rows: [] };
+    };
+    const pool = { query };
+
+    await insertRenderEvents(pool as unknown as Pool, 'p1', [
+      {
+        sessionId: 's1',
+        componentId: 1,
+        ts: '2026-01-01T00:00:00.000Z',
+        durationMs: 0.5,
+        renderReason: 1,
+        isAvoidable: false,
+        reasonDetail: null,
+        propsDiff: null,
+        contextDiff: null,
+        phase: 1,
+        componentPath: ['App#0'],
+        commitTime: 1,
+      },
+    ]);
+
+    expect(calls.filter((c) => c.text.includes('PARTITION OF render_events'))).toHaveLength(1);
+    expect(calls.filter((c) => c.text.includes('INSERT INTO render_events'))).toHaveLength(2);
+  });
+
+  it('rethrows a non-partition error without retrying', async () => {
+    const query = async (text: string) => {
+      if (text.includes('INSERT INTO render_events')) throw new Error('some other db error');
+      return { rows: [] };
+    };
+    const pool = { query };
+
+    await expect(
+      insertRenderEvents(pool as unknown as Pool, 'p1', [
+        {
+          sessionId: 's1',
+          componentId: 1,
+          ts: '2026-01-01T00:00:00.000Z',
+          durationMs: 0.5,
+          renderReason: 1,
+          isAvoidable: false,
+          reasonDetail: null,
+          propsDiff: null,
+          contextDiff: null,
+          phase: 1,
+          componentPath: ['App#0'],
+          commitTime: 1,
+        },
+      ]),
+    ).rejects.toThrow('some other db error');
+  });
 });
 
 describe('listSessions', () => {
@@ -168,27 +234,51 @@ describe('listSessionComponents', () => {
   });
 });
 
+describe('upsertSessionComponentRollup', () => {
+  it('inserts max_duration_ms as given, and takes the greater value on conflict', async () => {
+    const pool = createTestPool();
+    await upsertSessionComponentRollup(pool as unknown as Pool, {
+      sessionId: 's1',
+      componentId: 1,
+      renderCount: 1,
+      avoidableCount: 0,
+      totalDurationMs: 5,
+      maxDurationMs: 5,
+      lastRenderAt: '2026-01-01T00:00:00.000Z',
+    });
+
+    const { text, params } = pool.calls[0]!;
+    expect(text).toContain(
+      'max_duration_ms = GREATEST(session_component_rollups.max_duration_ms, EXCLUDED.max_duration_ms)',
+    );
+    expect(params).toEqual(['s1', 1, 1, 0, 5, 5, '2026-01-01T00:00:00.000Z']);
+  });
+});
+
 describe('listRenderEvents', () => {
   it('uses a keyset condition on (ts, id), never OFFSET', async () => {
     const pool = createTestPool();
     await listRenderEvents(pool as unknown as Pool, {
       sessionId: 's1',
+      projectId: 'p1',
       cursor: { ts: '2026-01-01T00:00:00.000Z', id: '100' },
       limit: 50,
     });
 
     const { text, params } = pool.calls[0]!;
     expect(text).not.toContain('OFFSET');
-    expect(text).toContain('(r.ts, r.id) < ($2, $3)');
+    expect(text).toContain('(r.ts, r.id) < ($3, $4)');
     expect(text).toContain('ORDER BY r.ts DESC, r.id DESC');
     expect(text).toContain('LIMIT 50');
     expect(text).toContain('JOIN components c ON c.id = r.component_id');
-    expect(params).toEqual(['s1', '2026-01-01T00:00:00.000Z', '100']);
+    expect(text).toContain('JOIN sessions s ON s.id = r.session_id');
+    expect(text).toContain('s.project_id = $2');
+    expect(params).toEqual(['s1', 'p1', '2026-01-01T00:00:00.000Z', '100']);
   });
 
   it('caps limit at 500 even if a larger value is requested', async () => {
     const pool = createTestPool();
-    await listRenderEvents(pool as unknown as Pool, { sessionId: 's1', limit: 10_000 });
+    await listRenderEvents(pool as unknown as Pool, { sessionId: 's1', projectId: 'p1', limit: 10_000 });
     expect(pool.calls[0]?.text).toContain('LIMIT 500');
   });
 
@@ -196,33 +286,82 @@ describe('listRenderEvents', () => {
     const pool = createTestPool();
     await listRenderEvents(pool as unknown as Pool, {
       sessionId: 's1',
+      projectId: 'p1',
       from: '2026-01-01T00:00:00.000Z',
       to: '2026-01-02T00:00:00.000Z',
     });
     const { text, params } = pool.calls[0]!;
-    expect(text).toContain('r.ts >= $2');
-    expect(text).toContain('r.ts < $3');
-    expect(params).toEqual(['s1', '2026-01-01T00:00:00.000Z', '2026-01-02T00:00:00.000Z']);
+    expect(text).toContain('r.ts >= $3');
+    expect(text).toContain('r.ts < $4');
+    expect(params).toEqual(['s1', 'p1', '2026-01-01T00:00:00.000Z', '2026-01-02T00:00:00.000Z']);
   });
 
   it('filters to avoidable-only renders via the partial index condition', async () => {
     const pool = createTestPool();
-    await listRenderEvents(pool as unknown as Pool, { sessionId: 's1', avoidableOnly: true });
+    await listRenderEvents(pool as unknown as Pool, {
+      sessionId: 's1',
+      projectId: 'p1',
+      avoidableOnly: true,
+    });
     expect(pool.calls[0]?.text).toContain('r.is_avoidable = true');
+  });
+
+  it('never returns another project\'s events for the same session id', async () => {
+    const pool = createTestPool();
+    await listRenderEvents(pool as unknown as Pool, { sessionId: 's1', projectId: 'p2' });
+    const { text, params } = pool.calls[0]!;
+    expect(text).toContain('s.project_id = $2');
+    expect(params).toEqual(['s1', 'p2']);
+  });
+
+  it('filters by component name via a wildcard-wrapped ILIKE', async () => {
+    const pool = createTestPool();
+    await listRenderEvents(pool as unknown as Pool, {
+      sessionId: 's1',
+      projectId: 'p1',
+      search: 'SearchBox',
+    });
+    const { text, params } = pool.calls[0]!;
+    expect(text).toContain('c.display_name ILIKE $3');
+    expect(params).toEqual(['s1', 'p1', '%SearchBox%']);
+  });
+
+  it('filters by render reason codes via = ANY, not by string', async () => {
+    const pool = createTestPool();
+    await listRenderEvents(pool as unknown as Pool, {
+      sessionId: 's1',
+      projectId: 'p1',
+      renderReasonCodes: [2, 5],
+    });
+    const { text, params } = pool.calls[0]!;
+    expect(text).toContain('r.render_reason = ANY($3::smallint[])');
+    expect(params).toEqual(['s1', 'p1', [2, 5]]);
+  });
+
+  it('ignores an empty renderReasonCodes array (no filter applied)', async () => {
+    const pool = createTestPool();
+    await listRenderEvents(pool as unknown as Pool, {
+      sessionId: 's1',
+      projectId: 'p1',
+      renderReasonCodes: [],
+    });
+    expect(pool.calls[0]?.text).not.toContain('= ANY');
   });
 });
 
 describe('listReplayEvents', () => {
   it('orders ascending by (ts, id), never DESC, no cursor support', async () => {
     const pool = createTestPool();
-    await listReplayEvents(pool as unknown as Pool, { sessionId: 's1', limit: 2001 });
+    await listReplayEvents(pool as unknown as Pool, { sessionId: 's1', projectId: 'p1', limit: 2001 });
 
     const { text, params } = pool.calls[0]!;
     expect(text).toContain('ORDER BY r.ts ASC, r.id ASC');
     expect(text).not.toContain('OFFSET');
     expect(text).not.toContain('DESC');
     expect(text).toContain('JOIN components c ON c.id = r.component_id');
-    expect(params).toEqual(['s1', 2001]);
+    expect(text).toContain('JOIN sessions s ON s.id = r.session_id');
+    expect(text).toContain('s.project_id = $2');
+    expect(params).toEqual(['s1', 'p1', 2001]);
   });
 
   it('selects phase, componentPath, and commitTime alongside the existing columns', async () => {
@@ -242,7 +381,11 @@ describe('listReplayEvents', () => {
         },
       ],
     }));
-    const rows = await listReplayEvents(pool as unknown as Pool, { sessionId: 's1', limit: 2001 });
+    const rows = await listReplayEvents(pool as unknown as Pool, {
+      sessionId: 's1',
+      projectId: 'p1',
+      limit: 2001,
+    });
 
     expect(pool.calls[0]?.text).toContain('r.phase');
     expect(pool.calls[0]?.text).toContain('r.commit_time AS "commitTime"');
@@ -256,33 +399,8 @@ describe('listReplayEvents', () => {
 
   it('passes limit straight through with no server-side cap', async () => {
     const pool = createTestPool();
-    await listReplayEvents(pool as unknown as Pool, { sessionId: 's1', limit: 2001 });
-    expect(pool.calls[0]?.params).toEqual(['s1', 2001]);
-  });
-
-  it('filters by component name via a wildcard-wrapped ILIKE', async () => {
-    const pool = createTestPool();
-    await listRenderEvents(pool as unknown as Pool, { sessionId: 's1', search: 'SearchBox' });
-    const { text, params } = pool.calls[0]!;
-    expect(text).toContain('c.display_name ILIKE $2');
-    expect(params).toEqual(['s1', '%SearchBox%']);
-  });
-
-  it('filters by render reason codes via = ANY, not by string', async () => {
-    const pool = createTestPool();
-    await listRenderEvents(pool as unknown as Pool, {
-      sessionId: 's1',
-      renderReasonCodes: [2, 5],
-    });
-    const { text, params } = pool.calls[0]!;
-    expect(text).toContain('r.render_reason = ANY($2::smallint[])');
-    expect(params).toEqual(['s1', [2, 5]]);
-  });
-
-  it('ignores an empty renderReasonCodes array (no filter applied)', async () => {
-    const pool = createTestPool();
-    await listRenderEvents(pool as unknown as Pool, { sessionId: 's1', renderReasonCodes: [] });
-    expect(pool.calls[0]?.text).not.toContain('= ANY');
+    await listReplayEvents(pool as unknown as Pool, { sessionId: 's1', projectId: 'p1', limit: 2001 });
+    expect(pool.calls[0]?.params).toEqual(['s1', 'p1', 2001]);
   });
 });
 
@@ -359,13 +477,17 @@ describe('listLongTaskEvents', () => {
 
     const tasks = await listLongTaskEvents(pool as unknown as Pool, {
       sessionId: 's1',
+      projectId: 'p1',
       cursor: { ts: '2026-01-01T00:00:00.000Z', id: '100' },
       limit: 50,
     });
 
     expect(pool.calls).toHaveLength(2);
     expect(pool.calls[0]?.text).not.toContain('OFFSET');
-    expect(pool.calls[0]?.text).toContain('(ts, id) < ($2, $3)');
+    expect(pool.calls[0]?.text).toContain('(lt.ts, lt.id) < ($3, $4)');
+    expect(pool.calls[0]?.text).toContain('JOIN sessions s ON s.id = lt.session_id');
+    expect(pool.calls[0]?.text).toContain('s.project_id = $2');
+    expect(pool.calls[0]?.params).toEqual(['s1', 'p1', '2026-01-01T00:00:00.000Z', '100']);
     expect(pool.calls[1]?.text).toContain('JOIN render_events r');
     expect(pool.calls[1]?.params).toEqual(['s1', ['1'], ['2026-01-01T00:00:00.000Z'], [80]]);
     expect(tasks).toEqual([
@@ -381,14 +503,21 @@ describe('listLongTaskEvents', () => {
 
   it('skips the correlation query entirely when the page is empty', async () => {
     const pool = createTestPool(() => ({ rows: [] }));
-    const tasks = await listLongTaskEvents(pool as unknown as Pool, { sessionId: 's1' });
+    const tasks = await listLongTaskEvents(pool as unknown as Pool, {
+      sessionId: 's1',
+      projectId: 'p1',
+    });
     expect(tasks).toEqual([]);
     expect(pool.calls).toHaveLength(1);
   });
 
   it('caps limit at 500 even if a larger value is requested', async () => {
     const pool = createTestPool();
-    await listLongTaskEvents(pool as unknown as Pool, { sessionId: 's1', limit: 10_000 });
+    await listLongTaskEvents(pool as unknown as Pool, {
+      sessionId: 's1',
+      projectId: 'p1',
+      limit: 10_000,
+    });
     expect(pool.calls[0]?.text).toContain('LIMIT 500');
   });
 });
@@ -398,21 +527,28 @@ describe('listNetworkRequestEvents', () => {
     const pool = createTestPool();
     await listNetworkRequestEvents(pool as unknown as Pool, {
       sessionId: 's1',
+      projectId: 'p1',
       cursor: { ts: '2026-01-01T00:00:00.000Z', id: '100' },
       limit: 50,
     });
 
     const { text, params } = pool.calls[0]!;
     expect(text).not.toContain('OFFSET');
-    expect(text).toContain('(ts, id) < ($2, $3)');
-    expect(text).toContain('ORDER BY ts DESC, id DESC');
+    expect(text).toContain('(nr.ts, nr.id) < ($3, $4)');
+    expect(text).toContain('ORDER BY nr.ts DESC, nr.id DESC');
+    expect(text).toContain('JOIN sessions s ON s.id = nr.session_id');
+    expect(text).toContain('s.project_id = $2');
     expect(text).toContain('LIMIT 50');
-    expect(params).toEqual(['s1', '2026-01-01T00:00:00.000Z', '100']);
+    expect(params).toEqual(['s1', 'p1', '2026-01-01T00:00:00.000Z', '100']);
   });
 
   it('caps limit at 500 even if a larger value is requested', async () => {
     const pool = createTestPool();
-    await listNetworkRequestEvents(pool as unknown as Pool, { sessionId: 's1', limit: 10_000 });
+    await listNetworkRequestEvents(pool as unknown as Pool, {
+      sessionId: 's1',
+      projectId: 'p1',
+      limit: 10_000,
+    });
     expect(pool.calls[0]?.text).toContain('LIMIT 500');
   });
 });
