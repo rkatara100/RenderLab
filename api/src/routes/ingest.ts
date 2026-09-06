@@ -33,6 +33,7 @@ import {
   shouldPersistContextDiff,
   shouldPersistPropsDiff,
 } from './renderReasonCodes.js';
+import { phaseToCode } from './eventPhaseCodes.js';
 
 const MAX_EVENTS_PER_BATCH = 500;
 
@@ -148,6 +149,9 @@ export function registerIngestRoutes(app: FastifyInstance, deps: IngestRouteDeps
           shouldPersistContextDiff(event.renderReason) && event.contextDiff
             ? JSON.stringify(event.contextDiff)
             : null,
+        phase: phaseToCode(event.phase),
+        componentPath: event.componentPath,
+        commitTime: event.commitTime,
       });
       hotPathBatch.push({ componentId, durationMs: event.actualDuration, isAvoidable });
     }

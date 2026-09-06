@@ -18,4 +18,5 @@ export const redisKeys = {
     `rl:${projectId}:ingest:${batchId}`,
   rateLimitIngest: (projectId: string): string => `rl:${projectId}:ratelimit:ingest`,
   rateLimitSignup: (ip: string): string => `rl:signup:ratelimit:${ip}`,
+  rateLimitReplay: (projectId: string): string => `rl:${projectId}:ratelimit:replay`,
 };

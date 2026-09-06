@@ -8,6 +8,7 @@ import {
   listLongTaskEvents,
   listNetworkRequestEvents,
   listRenderEvents,
+  listReplayEvents,
   listSessionComponents,
   listSessions,
   upsertComponent,
@@ -76,7 +77,7 @@ describe('insertRenderEvents', () => {
     expect(pool.calls).toHaveLength(0);
   });
 
-  it('builds one multi-row INSERT with 10 params per row, in order', async () => {
+  it('builds one multi-row INSERT with 13 params per row, in order', async () => {
     const pool = createTestPool();
     await insertRenderEvents(pool as unknown as Pool, 'p1', [
       {
@@ -89,6 +90,9 @@ describe('insertRenderEvents', () => {
         reasonDetail: 'initial mount',
         propsDiff: null,
         contextDiff: null,
+        phase: 1,
+        componentPath: ['App#0', 'SearchBox#0'],
+        commitTime: 10.5,
       },
       {
         sessionId: 's1',
@@ -100,12 +104,16 @@ describe('insertRenderEvents', () => {
         reasonDetail: 'not memoized; re-rendered because an ancestor did',
         propsDiff: '[]',
         contextDiff: null,
+        phase: 2,
+        componentPath: ['App#0', 'List#0'],
+        commitTime: 20.25,
       },
     ]);
 
     expect(pool.calls).toHaveLength(1);
     expect(pool.calls[0]?.text).toContain(
-      'VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10), ($11, $12, $13, $14, $15, $16, $17, $18, $19, $20)',
+      'VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13), ' +
+        '($14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)',
     );
     expect(pool.calls[0]?.params).toEqual([
       'p1',
@@ -118,6 +126,9 @@ describe('insertRenderEvents', () => {
       'initial mount',
       null,
       null,
+      1,
+      ['App#0', 'SearchBox#0'],
+      10.5,
       'p1',
       's1',
       2,
@@ -128,6 +139,9 @@ describe('insertRenderEvents', () => {
       'not memoized; re-rendered because an ancestor did',
       '[]',
       null,
+      2,
+      ['App#0', 'List#0'],
+      20.25,
     ]);
   });
 });
@@ -195,6 +209,55 @@ describe('listRenderEvents', () => {
     const pool = createTestPool();
     await listRenderEvents(pool as unknown as Pool, { sessionId: 's1', avoidableOnly: true });
     expect(pool.calls[0]?.text).toContain('r.is_avoidable = true');
+  });
+});
+
+describe('listReplayEvents', () => {
+  it('orders ascending by (ts, id), never DESC, no cursor support', async () => {
+    const pool = createTestPool();
+    await listReplayEvents(pool as unknown as Pool, { sessionId: 's1', limit: 2001 });
+
+    const { text, params } = pool.calls[0]!;
+    expect(text).toContain('ORDER BY r.ts ASC, r.id ASC');
+    expect(text).not.toContain('OFFSET');
+    expect(text).not.toContain('DESC');
+    expect(text).toContain('JOIN components c ON c.id = r.component_id');
+    expect(params).toEqual(['s1', 2001]);
+  });
+
+  it('selects phase, componentPath, and commitTime alongside the existing columns', async () => {
+    const pool = createTestPool(() => ({
+      rows: [
+        {
+          id: '1',
+          ts: '2026-01-01T00:00:00.000Z',
+          durationMs: 0.5,
+          renderReason: 1,
+          isAvoidable: false,
+          componentId: 1,
+          componentName: 'SearchBox',
+          phase: 1,
+          commitTime: 10.5,
+          componentPath: ['App#0', 'SearchBox#0'],
+        },
+      ],
+    }));
+    const rows = await listReplayEvents(pool as unknown as Pool, { sessionId: 's1', limit: 2001 });
+
+    expect(pool.calls[0]?.text).toContain('r.phase');
+    expect(pool.calls[0]?.text).toContain('r.commit_time AS "commitTime"');
+    expect(pool.calls[0]?.text).toContain('r.component_path AS "componentPath"');
+    expect(rows[0]).toMatchObject({
+      phase: 1,
+      commitTime: 10.5,
+      componentPath: ['App#0', 'SearchBox#0'],
+    });
+  });
+
+  it('passes limit straight through with no server-side cap', async () => {
+    const pool = createTestPool();
+    await listReplayEvents(pool as unknown as Pool, { sessionId: 's1', limit: 2001 });
+    expect(pool.calls[0]?.params).toEqual(['s1', 2001]);
   });
 });
 

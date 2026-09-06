@@ -7,6 +7,7 @@ import type {
   NetworkRequestSummary,
   RenderEventDetail,
   RenderTimelineEvent,
+  ReplayEvent,
   SessionSummary,
 } from '@renderlab/shared-types';
 import { authenticateRequest } from '../auth/apiKey.js';
@@ -15,10 +16,15 @@ import {
   listLongTaskEvents,
   listNetworkRequestEvents,
   listRenderEvents,
+  listReplayEvents,
   listSessionComponents,
   listSessions,
 } from '../db/repository.js';
 import { codeToRenderReason } from './renderReasonCodes.js';
+import { codeToPhase } from './eventPhaseCodes.js';
+import { checkRateLimit } from '../redis/rateLimit.js';
+import { redisKeys } from '../redis/keys.js';
+import type { RedisLike } from '../redis/hotPath.js';
 
 function parseJsonColumn<T>(value: string | null): T | null {
   return value ? (JSON.parse(value) as T) : null;
@@ -31,6 +37,12 @@ function isLive(endedAt: string | null, lastSeenAt: string): boolean {
 }
 
 const DEFAULT_EVENTS_PAGE_SIZE = 200;
+
+const REPLAY_EVENT_CAP = Number(process.env.REPLAY_EVENT_CAP ?? 2000);
+const REPLAY_RATE_LIMIT = Number(process.env.REPLAY_RATE_LIMIT_MAX ?? 30);
+const REPLAY_RATE_LIMIT_WINDOW_SECONDS = Number(
+  process.env.REPLAY_RATE_LIMIT_WINDOW_SECONDS ?? 60,
+);
 
 interface EventsQuery {
   limit?: string;
@@ -60,10 +72,11 @@ function parseCursor(query: PerfEventsQuery): EventPageCursor | undefined {
 
 export interface ReadRouteDeps {
   pool: Pool;
+  redis: RedisLike;
 }
 
 export function registerReadRoutes(app: FastifyInstance, deps: ReadRouteDeps): void {
-  const { pool } = deps;
+  const { pool, redis } = deps;
 
   app.get('/api/sessions', async (request, reply) => {
     const project = await authenticateRequest(pool, request);
@@ -130,6 +143,49 @@ export function registerReadRoutes(app: FastifyInstance, deps: ReadRouteDeps): v
           : null;
 
       return reply.send({ events, nextCursor });
+    },
+  );
+
+  app.get<{ Params: { sessionId: string } }>(
+    '/api/sessions/:sessionId/replay',
+    async (request, reply) => {
+      const project = await authenticateRequest(pool, request);
+      if (!project) return reply.code(401).send({ error: 'invalid or missing API key' });
+
+      const rateLimit = await checkRateLimit(
+        redis,
+        redisKeys.rateLimitReplay(project.id),
+        REPLAY_RATE_LIMIT,
+        REPLAY_RATE_LIMIT_WINDOW_SECONDS,
+      );
+      if (!rateLimit.allowed) {
+        return reply
+          .code(429)
+          .header('Retry-After', rateLimit.retryAfterSeconds)
+          .send({ error: 'rate limit exceeded, try again later' });
+      }
+
+      const eventRows = await listReplayEvents(pool, {
+        sessionId: request.params.sessionId,
+        limit: REPLAY_EVENT_CAP + 1,
+      });
+      const truncated = eventRows.length > REPLAY_EVENT_CAP;
+      const trimmedRows = truncated ? eventRows.slice(0, REPLAY_EVENT_CAP) : eventRows;
+
+      const events: ReplayEvent[] = trimmedRows.map((eventRow) => ({
+        id: eventRow.id,
+        ts: eventRow.ts,
+        durationMs: eventRow.durationMs,
+        renderReason: codeToRenderReason(eventRow.renderReason),
+        isAvoidable: eventRow.isAvoidable,
+        componentId: eventRow.componentId,
+        componentName: eventRow.componentName,
+        phase: codeToPhase(eventRow.phase),
+        componentPath: eventRow.componentPath,
+        commitTime: eventRow.commitTime,
+      }));
+
+      return reply.send({ events, truncated });
     },
   );
 

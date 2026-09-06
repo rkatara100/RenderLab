@@ -108,6 +108,9 @@ export interface RenderEventRow {
   reasonDetail: string | null;
   propsDiff: string | null;
   contextDiff: string | null;
+  phase: number;
+  componentPath: string[];
+  commitTime: number;
 }
 
 const RENDER_EVENT_COLUMNS = [
@@ -121,6 +124,9 @@ const RENDER_EVENT_COLUMNS = [
   'reason_detail',
   'props_diff',
   'context_diff',
+  'phase',
+  'component_path',
+  'commit_time',
 ];
 
 export async function insertRenderEvents(
@@ -151,6 +157,9 @@ export async function insertRenderEvents(
       row.reasonDetail,
       row.propsDiff,
       row.contextDiff,
+      row.phase,
+      row.componentPath,
+      row.commitTime,
     );
   });
 
@@ -224,6 +233,42 @@ export async function listRenderEvents(
      ORDER BY r.ts DESC, r.id DESC
      LIMIT ${limit}`,
     values,
+  );
+  return rows;
+}
+
+export interface ReplayEventPageRow {
+  id: string;
+  ts: string;
+  durationMs: number;
+  renderReason: number;
+  isAvoidable: boolean;
+  componentId: number;
+  componentName: string;
+  phase: number;
+  componentPath: string[];
+  commitTime: number;
+}
+
+export interface ListReplayEventsParams {
+  sessionId: string;
+  limit: number;
+}
+
+export async function listReplayEvents(
+  pool: Pool,
+  params: ListReplayEventsParams,
+): Promise<ReplayEventPageRow[]> {
+  const { rows } = await pool.query<ReplayEventPageRow>(
+    `SELECT r.id, r.ts, r.duration_ms AS "durationMs", r.render_reason AS "renderReason",
+            r.is_avoidable AS "isAvoidable", r.component_id AS "componentId", c.display_name AS "componentName",
+            r.phase, r.commit_time AS "commitTime", r.component_path AS "componentPath"
+     FROM render_events r
+     JOIN components c ON c.id = r.component_id
+     WHERE r.session_id = $1
+     ORDER BY r.ts ASC, r.id ASC
+     LIMIT $2`,
+    [params.sessionId, params.limit],
   );
   return rows;
 }
