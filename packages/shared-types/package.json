@@ -1,10 +1,17 @@
 {
   "name": "@renderlab/shared-types",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
+  "description": "Shared TypeScript contracts between the RenderLab SDK, API, and dashboard",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rkatara100/RenderLab.git",
+    "directory": "packages/shared-types"
+  },
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "files": ["dist"],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
