@@ -26,6 +26,7 @@ import { codeToPhase } from './eventPhaseCodes.js';
 import { checkRateLimit } from '../redis/rateLimit.js';
 import { redisKeys } from '../redis/keys.js';
 import type { RedisLike } from '../redis/hotPath.js';
+import { getEnv, type AppEnv } from '../config/env.js';
 
 const VALID_RENDER_REASONS: RenderReason[] = [
   'mount',
@@ -73,21 +74,12 @@ function isLive(endedAt: string | null, lastSeenAt: string): boolean {
 
 const DEFAULT_EVENTS_PAGE_SIZE = 200;
 
-const REPLAY_EVENT_CAP = Number(process.env.REPLAY_EVENT_CAP ?? 2000);
-const REPLAY_RATE_LIMIT = Number(process.env.REPLAY_RATE_LIMIT_MAX ?? 30);
-const REPLAY_RATE_LIMIT_WINDOW_SECONDS = Number(
-  process.env.REPLAY_RATE_LIMIT_WINDOW_SECONDS ?? 60,
-);
-
-const READ_RATE_LIMIT = Number(process.env.READ_RATE_LIMIT_MAX ?? 120);
-const READ_RATE_LIMIT_WINDOW_SECONDS = Number(process.env.READ_RATE_LIMIT_WINDOW_SECONDS ?? 60);
-
-async function checkReadRateLimit(redis: RedisLike, projectId: string) {
+function checkReadRateLimit(redis: RedisLike, projectId: string, env: AppEnv) {
   return checkRateLimit(
     redis,
     redisKeys.rateLimitRead(projectId),
-    READ_RATE_LIMIT,
-    READ_RATE_LIMIT_WINDOW_SECONDS,
+    env.readRateLimitMax,
+    env.readRateLimitWindowSeconds,
   );
 }
 
@@ -122,16 +114,18 @@ function parseCursor(query: PerfEventsQuery): EventPageCursor | undefined {
 export interface ReadRouteDeps {
   pool: Pool;
   redis: RedisLike;
+  env?: AppEnv;
 }
 
 export function registerReadRoutes(app: FastifyInstance, deps: ReadRouteDeps): void {
   const { pool, redis } = deps;
+  const env = deps.env ?? getEnv();
 
   app.get('/api/sessions', async (request, reply) => {
     const project = await authenticateRequest(pool, request, 'dashboard');
     if (!project) return reply.code(401).send({ error: 'invalid or missing API key' });
 
-    const rateLimit = await checkReadRateLimit(redis, project.id);
+    const rateLimit = await checkReadRateLimit(redis, project.id, env);
     if (!rateLimit.allowed) {
       return reply
         .code(429)
@@ -156,7 +150,7 @@ export function registerReadRoutes(app: FastifyInstance, deps: ReadRouteDeps): v
         return reply.code(422).send({ error: 'sessionId must be a valid UUID' });
       }
 
-      const rateLimit = await checkReadRateLimit(redis, project.id);
+      const rateLimit = await checkReadRateLimit(redis, project.id, env);
       if (!rateLimit.allowed) {
         return reply
           .code(429)
@@ -182,7 +176,7 @@ export function registerReadRoutes(app: FastifyInstance, deps: ReadRouteDeps): v
         return reply.code(422).send({ error: 'sessionId must be a valid UUID' });
       }
 
-      const rateLimit = await checkReadRateLimit(redis, project.id);
+      const rateLimit = await checkReadRateLimit(redis, project.id, env);
       if (!rateLimit.allowed) {
         return reply
           .code(429)
@@ -249,8 +243,8 @@ export function registerReadRoutes(app: FastifyInstance, deps: ReadRouteDeps): v
       const rateLimit = await checkRateLimit(
         redis,
         redisKeys.rateLimitReplay(project.id),
-        REPLAY_RATE_LIMIT,
-        REPLAY_RATE_LIMIT_WINDOW_SECONDS,
+        env.replayRateLimitMax,
+        env.replayRateLimitWindowSeconds,
       );
       if (!rateLimit.allowed) {
         return reply
@@ -262,10 +256,10 @@ export function registerReadRoutes(app: FastifyInstance, deps: ReadRouteDeps): v
       const eventRows = await listReplayEvents(pool, {
         sessionId: request.params.sessionId,
         projectId: project.id,
-        limit: REPLAY_EVENT_CAP + 1,
+        limit: env.replayEventCap + 1,
       });
-      const truncated = eventRows.length > REPLAY_EVENT_CAP;
-      const trimmedRows = truncated ? eventRows.slice(0, REPLAY_EVENT_CAP) : eventRows;
+      const truncated = eventRows.length > env.replayEventCap;
+      const trimmedRows = truncated ? eventRows.slice(0, env.replayEventCap) : eventRows;
 
       const events: ReplayEvent[] = trimmedRows.map((eventRow) => ({
         id: eventRow.id,
@@ -296,7 +290,7 @@ export function registerReadRoutes(app: FastifyInstance, deps: ReadRouteDeps): v
         return reply.code(422).send({ error: 'ts query parameter is required' });
       }
 
-      const rateLimit = await checkReadRateLimit(redis, project.id);
+      const rateLimit = await checkReadRateLimit(redis, project.id, env);
       if (!rateLimit.allowed) {
         return reply
           .code(429)
@@ -338,7 +332,7 @@ export function registerReadRoutes(app: FastifyInstance, deps: ReadRouteDeps): v
         return reply.code(422).send({ error: 'sessionId must be a valid UUID' });
       }
 
-      const rateLimit = await checkReadRateLimit(redis, project.id);
+      const rateLimit = await checkReadRateLimit(redis, project.id, env);
       if (!rateLimit.allowed) {
         return reply
           .code(429)
@@ -384,7 +378,7 @@ export function registerReadRoutes(app: FastifyInstance, deps: ReadRouteDeps): v
         return reply.code(422).send({ error: 'sessionId must be a valid UUID' });
       }
 
-      const rateLimit = await checkReadRateLimit(redis, project.id);
+      const rateLimit = await checkReadRateLimit(redis, project.id, env);
       if (!rateLimit.allowed) {
         return reply
           .code(429)

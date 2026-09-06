@@ -22,4 +22,5 @@ export const redisKeys = {
   rateLimitSignup: (ip: string): string => `rl:signup:ratelimit:${ip}`,
   rateLimitReplay: (projectId: string): string => `rl:${projectId}:ratelimit:replay`,
   rateLimitRead: (projectId: string): string => `rl:${projectId}:ratelimit:read`,
+  rateLimitRotate: (projectId: string): string => `rl:${projectId}:ratelimit:rotate`,
 };

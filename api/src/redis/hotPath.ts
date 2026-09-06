@@ -8,6 +8,7 @@ export interface RedisLike {
   expire: (key: string, seconds: number) => Promise<number>;
   hgetall: (key: string) => Promise<Record<string, string> | null>;
   del: (...keys: string[]) => Promise<number>;
+  eval: (script: string, keys: string[], args: (string | number)[]) => Promise<unknown>;
 }
 
 export interface HotPathEvent {
