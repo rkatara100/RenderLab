@@ -25,6 +25,8 @@ import {
   type HotPathEvent,
   type RedisLike,
 } from '../redis/hotPath.js';
+import { checkRateLimit } from '../redis/rateLimit.js';
+import { redisKeys } from '../redis/keys.js';
 import {
   isAvoidableRender,
   renderReasonToCode,
@@ -33,6 +35,11 @@ import {
 } from './renderReasonCodes.js';
 
 const MAX_EVENTS_PER_BATCH = 500;
+
+const INGEST_RATE_LIMIT = Number(process.env.INGEST_RATE_LIMIT_MAX ?? 600);
+const INGEST_RATE_LIMIT_WINDOW_SECONDS = Number(
+  process.env.INGEST_RATE_LIMIT_WINDOW_SECONDS ?? 60,
+);
 
 interface IngestEventsBody {
   batch_id: string;
@@ -74,6 +81,19 @@ export function registerIngestRoutes(app: FastifyInstance, deps: IngestRouteDeps
     const project = await authenticateRequest(pool, request);
     if (!project) {
       return reply.code(401).send({ error: 'invalid or missing API key' });
+    }
+
+    const rateLimit = await checkRateLimit(
+      redis,
+      redisKeys.rateLimitIngest(project.id),
+      INGEST_RATE_LIMIT,
+      INGEST_RATE_LIMIT_WINDOW_SECONDS,
+    );
+    if (!rateLimit.allowed) {
+      return reply
+        .code(429)
+        .header('Retry-After', rateLimit.retryAfterSeconds)
+        .send({ error: 'rate limit exceeded, try again later' });
     }
 
     const body = request.body;

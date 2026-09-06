@@ -3,12 +3,12 @@ import type { LongTaskEvent } from '@renderlab/shared-types';
 import type { RenderLabRuntime } from '../../src/capture/runtime.js';
 import { startLongTaskObserver } from '../../src/observers/longTaskObserver.js';
 
-class FakePerformanceObserver {
-  static instances: FakePerformanceObserver[] = [];
+class TestPerformanceObserver {
+  static instances: TestPerformanceObserver[] = [];
   observedTypes: string[] = [];
   disconnected = false;
   constructor(private readonly callback: (list: { getEntries: () => unknown[] }) => void) {
-    FakePerformanceObserver.instances.push(this);
+    TestPerformanceObserver.instances.push(this);
   }
   observe(options: { entryTypes: string[] }): void {
     this.observedTypes = options.entryTypes;
@@ -36,8 +36,8 @@ function makeRuntime(): RenderLabRuntime {
 
 describe('startLongTaskObserver', () => {
   beforeEach(() => {
-    FakePerformanceObserver.instances = [];
-    vi.stubGlobal('PerformanceObserver', FakePerformanceObserver);
+    TestPerformanceObserver.instances = [];
+    vi.stubGlobal('PerformanceObserver', TestPerformanceObserver);
   });
   afterEach(() => vi.unstubAllGlobals());
 
@@ -52,13 +52,13 @@ describe('startLongTaskObserver', () => {
   it('observes the longtask entry type', () => {
     const runtime = makeRuntime();
     startLongTaskObserver(runtime);
-    expect(FakePerformanceObserver.instances[0]?.observedTypes).toEqual(['longtask']);
+    expect(TestPerformanceObserver.instances[0]?.observedTypes).toEqual(['longtask']);
   });
 
   it('enqueues a LongTaskEvent per entry, converting startTime to wall clock', () => {
     const runtime = makeRuntime();
     startLongTaskObserver(runtime);
-    const observer = FakePerformanceObserver.instances[0];
+    const observer = TestPerformanceObserver.instances[0];
     if (!observer) throw new Error('observer not created');
 
     observer.emit([{ startTime: 100, duration: 75, attribution: [{ name: 'script' }] }]);
@@ -75,7 +75,7 @@ describe('startLongTaskObserver', () => {
   it('defaults attribution entries with no name to "unknown"', () => {
     const runtime = makeRuntime();
     startLongTaskObserver(runtime);
-    const observer = FakePerformanceObserver.instances[0];
+    const observer = TestPerformanceObserver.instances[0];
     if (!observer) throw new Error('observer not created');
 
     observer.emit([{ startTime: 0, duration: 60, attribution: [{}] }]);
@@ -88,6 +88,6 @@ describe('startLongTaskObserver', () => {
     const runtime = makeRuntime();
     const dispose = startLongTaskObserver(runtime);
     dispose();
-    expect(FakePerformanceObserver.instances[0]?.disconnected).toBe(true);
+    expect(TestPerformanceObserver.instances[0]?.disconnected).toBe(true);
   });
 });

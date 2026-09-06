@@ -9,11 +9,11 @@ import type {
   SessionSummary,
 } from '@renderlab/shared-types';
 import { buildServer } from '../src/server.js';
-import { createFakeRedis } from './fakes.js';
+import { createTestRedis } from './doubles.js';
 
 const API_KEY = 'test-project-api-key-0001';
 
-function makeFakePool(
+function createPool(
   overrides: {
     sessionRows?: unknown[];
     componentRows?: unknown[];
@@ -83,7 +83,7 @@ function makeEventRow(
 
 describe('GET /api/sessions', () => {
   it('requires a valid API key', async () => {
-    const app = buildServer({ pool: makeFakePool() as unknown as Pool, redis: createFakeRedis() });
+    const app = buildServer({ pool: createPool() as unknown as Pool, redis: createTestRedis() });
     const res = await app.inject({ method: 'GET', url: '/api/sessions' });
     expect(res.statusCode).toBe(401);
   });
@@ -91,7 +91,7 @@ describe('GET /api/sessions', () => {
   it('returns sessions with a derived isLive flag', async () => {
     const now = new Date().toISOString();
     const stale = new Date(Date.now() - 120_000).toISOString();
-    const pool = makeFakePool({
+    const pool = createPool({
       sessionRows: [
         {
           id: 's1',
@@ -113,7 +113,7 @@ describe('GET /api/sessions', () => {
         },
       ],
     });
-    const app = buildServer({ pool: pool as unknown as Pool, redis: createFakeRedis() });
+    const app = buildServer({ pool: pool as unknown as Pool, redis: createTestRedis() });
 
     const res = await app.inject({
       method: 'GET',
@@ -128,7 +128,7 @@ describe('GET /api/sessions', () => {
   });
 
   it('returns an empty list rather than an error when the project has no sessions', async () => {
-    const app = buildServer({ pool: makeFakePool() as unknown as Pool, redis: createFakeRedis() });
+    const app = buildServer({ pool: createPool() as unknown as Pool, redis: createTestRedis() });
     const res = await app.inject({
       method: 'GET',
       url: '/api/sessions',
@@ -141,13 +141,13 @@ describe('GET /api/sessions', () => {
 
 describe('GET /api/sessions/:sessionId/components', () => {
   it('requires a valid API key', async () => {
-    const app = buildServer({ pool: makeFakePool() as unknown as Pool, redis: createFakeRedis() });
+    const app = buildServer({ pool: createPool() as unknown as Pool, redis: createTestRedis() });
     const res = await app.inject({ method: 'GET', url: '/api/sessions/s1/components' });
     expect(res.statusCode).toBe(401);
   });
 
   it('returns the component rollup list for a session', async () => {
-    const pool = makeFakePool({
+    const pool = createPool({
       componentRows: [
         {
           componentId: 1,
@@ -161,7 +161,7 @@ describe('GET /api/sessions/:sessionId/components', () => {
         },
       ],
     });
-    const app = buildServer({ pool: pool as unknown as Pool, redis: createFakeRedis() });
+    const app = buildServer({ pool: pool as unknown as Pool, redis: createTestRedis() });
 
     const res = await app.inject({
       method: 'GET',
@@ -177,14 +177,14 @@ describe('GET /api/sessions/:sessionId/components', () => {
 
 describe('GET /api/sessions/:sessionId/events', () => {
   it('requires a valid API key', async () => {
-    const app = buildServer({ pool: makeFakePool() as unknown as Pool, redis: createFakeRedis() });
+    const app = buildServer({ pool: createPool() as unknown as Pool, redis: createTestRedis() });
     const res = await app.inject({ method: 'GET', url: '/api/sessions/s1/events' });
     expect(res.statusCode).toBe(401);
   });
 
   it('decodes the numeric render_reason back to the SDK string union', async () => {
-    const pool = makeFakePool({ eventRows: [makeEventRow({ renderReason: 5 })] });
-    const app = buildServer({ pool: pool as unknown as Pool, redis: createFakeRedis() });
+    const pool = createPool({ eventRows: [makeEventRow({ renderReason: 5 })] });
+    const app = buildServer({ pool: pool as unknown as Pool, redis: createTestRedis() });
 
     const res = await app.inject({
       method: 'GET',
@@ -200,8 +200,8 @@ describe('GET /api/sessions/:sessionId/events', () => {
     const full = Array.from({ length: 3 }, (_, i) =>
       makeEventRow({ id: String(i), ts: `2026-01-01T00:00:0${i}.000Z` }),
     );
-    const pool = makeFakePool({ eventRows: full });
-    const app = buildServer({ pool: pool as unknown as Pool, redis: createFakeRedis() });
+    const pool = createPool({ eventRows: full });
+    const app = buildServer({ pool: pool as unknown as Pool, redis: createTestRedis() });
 
     const fullPage = await app.inject({
       method: 'GET',
@@ -220,8 +220,8 @@ describe('GET /api/sessions/:sessionId/events', () => {
   });
 
   it('forwards cursorTs/cursorId as the keyset cursor', async () => {
-    const pool = makeFakePool({ eventRows: [] });
-    const app = buildServer({ pool: pool as unknown as Pool, redis: createFakeRedis() });
+    const pool = createPool({ eventRows: [] });
+    const app = buildServer({ pool: pool as unknown as Pool, redis: createTestRedis() });
 
     await app.inject({
       method: 'GET',
@@ -235,8 +235,8 @@ describe('GET /api/sessions/:sessionId/events', () => {
   });
 
   it('forwards avoidableOnly=true to the partial-index filter', async () => {
-    const pool = makeFakePool({ eventRows: [] });
-    const app = buildServer({ pool: pool as unknown as Pool, redis: createFakeRedis() });
+    const pool = createPool({ eventRows: [] });
+    const app = buildServer({ pool: pool as unknown as Pool, redis: createTestRedis() });
 
     await app.inject({
       method: 'GET',
@@ -251,7 +251,7 @@ describe('GET /api/sessions/:sessionId/events', () => {
 
 describe('GET /api/sessions/:sessionId/events/:eventId', () => {
   it('requires a valid API key', async () => {
-    const app = buildServer({ pool: makeFakePool() as unknown as Pool, redis: createFakeRedis() });
+    const app = buildServer({ pool: createPool() as unknown as Pool, redis: createTestRedis() });
     const res = await app.inject({
       method: 'GET',
       url: '/api/sessions/s1/events/1?ts=2026-01-01T00:00:00.000Z',
@@ -260,7 +260,7 @@ describe('GET /api/sessions/:sessionId/events/:eventId', () => {
   });
 
   it('requires the ts query parameter', async () => {
-    const app = buildServer({ pool: makeFakePool() as unknown as Pool, redis: createFakeRedis() });
+    const app = buildServer({ pool: createPool() as unknown as Pool, redis: createTestRedis() });
     const res = await app.inject({
       method: 'GET',
       url: '/api/sessions/s1/events/1',
@@ -270,8 +270,8 @@ describe('GET /api/sessions/:sessionId/events/:eventId', () => {
   });
 
   it('returns 404 when the event does not exist for that session', async () => {
-    const pool = makeFakePool({ eventDetailRow: null });
-    const app = buildServer({ pool: pool as unknown as Pool, redis: createFakeRedis() });
+    const pool = createPool({ eventDetailRow: null });
+    const app = buildServer({ pool: pool as unknown as Pool, redis: createTestRedis() });
     const res = await app.inject({
       method: 'GET',
       url: '/api/sessions/s1/events/999?ts=2026-01-01T00:00:00.000Z',
@@ -281,7 +281,7 @@ describe('GET /api/sessions/:sessionId/events/:eventId', () => {
   });
 
   it('decodes render_reason and parses the JSON diff payloads', async () => {
-    const pool = makeFakePool({
+    const pool = createPool({
       eventDetailRow: {
         id: '1',
         ts: '2026-01-01T00:00:00.000Z',
@@ -304,7 +304,7 @@ describe('GET /api/sessions/:sessionId/events/:eventId', () => {
         contextDiff: null,
       },
     });
-    const app = buildServer({ pool: pool as unknown as Pool, redis: createFakeRedis() });
+    const app = buildServer({ pool: pool as unknown as Pool, redis: createTestRedis() });
 
     const res = await app.inject({
       method: 'GET',
@@ -331,19 +331,19 @@ describe('GET /api/sessions/:sessionId/events/:eventId', () => {
 
 describe('GET /api/sessions/:sessionId/long-tasks', () => {
   it('requires a valid API key', async () => {
-    const app = buildServer({ pool: makeFakePool() as unknown as Pool, redis: createFakeRedis() });
+    const app = buildServer({ pool: createPool() as unknown as Pool, redis: createTestRedis() });
     const res = await app.inject({ method: 'GET', url: '/api/sessions/s1/long-tasks' });
     expect(res.statusCode).toBe(401);
   });
 
   it('returns tasks with server-computed correlatedComponentNames', async () => {
-    const pool = makeFakePool({
+    const pool = createPool({
       longTaskRows: [
         { id: '1', ts: '2026-01-01T00:00:00.000Z', durationMs: 90, attribution: ['script'] },
       ],
       correlationRows: [{ taskId: '1', componentNames: ['SearchBox', 'ResultsList'] }],
     });
-    const app = buildServer({ pool: pool as unknown as Pool, redis: createFakeRedis() });
+    const app = buildServer({ pool: pool as unknown as Pool, redis: createTestRedis() });
 
     const res = await app.inject({
       method: 'GET',
@@ -363,8 +363,8 @@ describe('GET /api/sessions/:sessionId/long-tasks', () => {
       durationMs: 60,
       attribution: [],
     }));
-    const pool = makeFakePool({ longTaskRows: full });
-    const app = buildServer({ pool: pool as unknown as Pool, redis: createFakeRedis() });
+    const pool = createPool({ longTaskRows: full });
+    const app = buildServer({ pool: pool as unknown as Pool, redis: createTestRedis() });
 
     const res = await app.inject({
       method: 'GET',
@@ -378,13 +378,13 @@ describe('GET /api/sessions/:sessionId/long-tasks', () => {
 
 describe('GET /api/sessions/:sessionId/network-requests', () => {
   it('requires a valid API key', async () => {
-    const app = buildServer({ pool: makeFakePool() as unknown as Pool, redis: createFakeRedis() });
+    const app = buildServer({ pool: createPool() as unknown as Pool, redis: createTestRedis() });
     const res = await app.inject({ method: 'GET', url: '/api/sessions/s1/network-requests' });
     expect(res.statusCode).toBe(401);
   });
 
   it('returns the network request list for a session', async () => {
-    const pool = makeFakePool({
+    const pool = createPool({
       networkRequestRows: [
         {
           id: '1',
@@ -398,7 +398,7 @@ describe('GET /api/sessions/:sessionId/network-requests', () => {
         },
       ],
     });
-    const app = buildServer({ pool: pool as unknown as Pool, redis: createFakeRedis() });
+    const app = buildServer({ pool: pool as unknown as Pool, redis: createTestRedis() });
 
     const res = await app.inject({
       method: 'GET',
@@ -413,8 +413,8 @@ describe('GET /api/sessions/:sessionId/network-requests', () => {
   });
 
   it('forwards cursorTs/cursorId as the keyset cursor', async () => {
-    const pool = makeFakePool({ networkRequestRows: [] });
-    const app = buildServer({ pool: pool as unknown as Pool, redis: createFakeRedis() });
+    const pool = createPool({ networkRequestRows: [] });
+    const app = buildServer({ pool: pool as unknown as Pool, redis: createTestRedis() });
 
     await app.inject({
       method: 'GET',

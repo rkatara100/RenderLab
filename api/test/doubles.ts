@@ -1,28 +1,28 @@
 import type { RedisLike } from '../src/redis/hotPath.js';
 
-export interface FakeQuery {
+export interface QueryCall {
   text: string;
   params: unknown[];
 }
 
-export interface FakePool {
-  calls: FakeQuery[];
+export interface TestPool {
+  calls: QueryCall[];
   query: (text: string, params?: unknown[]) => Promise<{ rows: unknown[] }>;
-  connect: () => Promise<{ query: FakePool['query']; release: () => void }>;
+  connect: () => Promise<{ query: TestPool['query']; release: () => void }>;
 }
 
-export function createFakePool(
+export function createTestPool(
   handler: (text: string, params: unknown[]) => { rows: unknown[] } = () => ({ rows: [] }),
-): FakePool {
-  const calls: FakeQuery[] = [];
-  const query: FakePool['query'] = (text, params = []) => {
+): TestPool {
+  const calls: QueryCall[] = [];
+  const query: TestPool['query'] = (text, params = []) => {
     calls.push({ text, params });
     return Promise.resolve(handler(text, params));
   };
   return { calls, query, connect: () => Promise.resolve({ query, release: () => {} }) };
 }
 
-export function createFakeRedis(): RedisLike & { store: Map<string, unknown> } {
+export function createTestRedis(): RedisLike & { store: Map<string, unknown> } {
   const store = new Map<string, unknown>();
   const hashes = new Map<string, Map<string, number>>();
 

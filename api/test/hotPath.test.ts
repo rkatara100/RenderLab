@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { isDuplicateBatch, recordBatchHotPath } from '../src/redis/hotPath.js';
 import { redisKeys } from '../src/redis/keys.js';
-import { createFakeRedis } from './fakes.js';
+import { createTestRedis } from './doubles.js';
 
 describe('recordBatchHotPath', () => {
   it('refreshes presence and increments the rolling render counter by batch size', async () => {
-    const redis = createFakeRedis();
+    const redis = createTestRedis();
     await recordBatchHotPath(redis, 'p1', 's1', [
       { componentId: 1, durationMs: 0.5, isAvoidable: false },
       { componentId: 1, durationMs: 1, isAvoidable: false },
@@ -16,7 +16,7 @@ describe('recordBatchHotPath', () => {
   });
 
   it('increments per-component counts/duration, and avoidable counts only when isAvoidable', async () => {
-    const redis = createFakeRedis();
+    const redis = createTestRedis();
     await recordBatchHotPath(redis, 'p1', 's1', [
       { componentId: 7, durationMs: 2, isAvoidable: true },
       { componentId: 7, durationMs: 3, isAvoidable: false },
@@ -32,7 +32,7 @@ describe('recordBatchHotPath', () => {
   });
 
   it('is a no-op beyond presence refresh for an empty batch', async () => {
-    const redis = createFakeRedis();
+    const redis = createTestRedis();
     await recordBatchHotPath(redis, 'p1', 's1', []);
     expect(redis.store.has(redisKeys.renderCount('p1', 's1'))).toBe(false);
   });
@@ -40,13 +40,13 @@ describe('recordBatchHotPath', () => {
 
 describe('isDuplicateBatch', () => {
   it('returns false the first time a batch_id is seen, true on replay', async () => {
-    const redis = createFakeRedis();
+    const redis = createTestRedis();
     expect(await isDuplicateBatch(redis, 'p1', 'batch-1')).toBe(false);
     expect(await isDuplicateBatch(redis, 'p1', 'batch-1')).toBe(true);
   });
 
   it('treats different batch_ids independently', async () => {
-    const redis = createFakeRedis();
+    const redis = createTestRedis();
     expect(await isDuplicateBatch(redis, 'p1', 'batch-1')).toBe(false);
     expect(await isDuplicateBatch(redis, 'p1', 'batch-2')).toBe(false);
   });

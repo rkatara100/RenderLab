@@ -24,7 +24,7 @@ function corsOrigin(): boolean | string[] {
 }
 
 export function buildServer(deps: ServerDeps = {}): FastifyInstance {
-  const app = Fastify({ logger: false });
+  const app = Fastify({ logger: false, trustProxy: true });
   const pool = deps.pool ?? getPool();
   const redis = deps.redis ?? getRedis();
 
@@ -35,7 +35,7 @@ export function buildServer(deps: ServerDeps = {}): FastifyInstance {
   });
 
   registerIngestRoutes(app, { pool, redis });
-  registerProjectRoutes(app, { pool });
+  registerProjectRoutes(app, { pool, redis });
   registerReadRoutes(app, { pool });
 
   return app;
