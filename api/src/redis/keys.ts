@@ -16,4 +16,6 @@ export const redisKeys = {
     `rl:${projectId}:session:${sessionId}:recent_events`,
   ingestIdempotency: (projectId: string, batchId: string): string =>
     `rl:${projectId}:ingest:${batchId}`,
+  rateLimitIngest: (projectId: string): string => `rl:${projectId}:ratelimit:ingest`,
+  rateLimitSignup: (ip: string): string => `rl:signup:ratelimit:${ip}`,
 };

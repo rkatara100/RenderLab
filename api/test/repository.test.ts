@@ -13,42 +13,42 @@ import {
   upsertComponent,
   upsertSession,
 } from '../src/db/repository.js';
-import { createFakePool } from './fakes.js';
+import { createTestPool } from './doubles.js';
 import type { Pool } from 'pg';
 
 describe('findProjectByApiKey', () => {
   it('looks up by key prefix, then compares the full key among candidates', async () => {
-    const fake = createFakePool(() => ({
+    const pool = createTestPool(() => ({
       rows: [{ id: 'p1', api_key: 'abcd1234-real', is_active: true }],
     }));
 
-    const project = await findProjectByApiKey(fake as unknown as Pool, 'abcd1234-real');
+    const project = await findProjectByApiKey(pool as unknown as Pool, 'abcd1234-real');
 
-    expect(fake.calls[0]?.params).toEqual(['abcd1234']);
+    expect(pool.calls[0]?.params).toEqual(['abcd1234']);
     expect(project).toEqual({ id: 'p1', isActive: true });
   });
 
   it('returns null when no candidate matches the full key', async () => {
-    const fake = createFakePool(() => ({
+    const pool = createTestPool(() => ({
       rows: [{ id: 'p1', api_key: 'other-key', is_active: true }],
     }));
-    const project = await findProjectByApiKey(fake as unknown as Pool, 'abcd1234-real');
+    const project = await findProjectByApiKey(pool as unknown as Pool, 'abcd1234-real');
     expect(project).toBeNull();
   });
 });
 
 describe('upsertSession', () => {
   it('upserts on (project_id, sdk_session_key) and refreshes last_seen_at', async () => {
-    const fake = createFakePool(() => ({ rows: [{ id: 'sess-1' }] }));
-    const id = await upsertSession(fake as unknown as Pool, {
+    const pool = createTestPool(() => ({ rows: [{ id: 'sess-1' }] }));
+    const id = await upsertSession(pool as unknown as Pool, {
       projectId: 'p1',
       sdkSessionKey: 'sdk-key-1',
       startedAt: '2026-01-01T00:00:00.000Z',
     });
 
     expect(id).toBe('sess-1');
-    expect(fake.calls[0]?.text).toContain('ON CONFLICT (project_id, sdk_session_key)');
-    expect(fake.calls[0]?.params).toEqual([
+    expect(pool.calls[0]?.text).toContain('ON CONFLICT (project_id, sdk_session_key)');
+    expect(pool.calls[0]?.params).toEqual([
       'p1',
       'sdk-key-1',
       '2026-01-01T00:00:00.000Z',
@@ -61,24 +61,24 @@ describe('upsertSession', () => {
 
 describe('upsertComponent', () => {
   it('dedupes on (project_id, fiber_path_hash), keyed by componentName', async () => {
-    const fake = createFakePool(() => ({ rows: [{ id: 42 }] }));
-    const id = await upsertComponent(fake as unknown as Pool, 'p1', 'SearchBox');
+    const pool = createTestPool(() => ({ rows: [{ id: 42 }] }));
+    const id = await upsertComponent(pool as unknown as Pool, 'p1', 'SearchBox');
 
     expect(id).toBe(42);
-    expect(fake.calls[0]?.params).toEqual(['p1', 'SearchBox', 'SearchBox']);
+    expect(pool.calls[0]?.params).toEqual(['p1', 'SearchBox', 'SearchBox']);
   });
 });
 
 describe('insertRenderEvents', () => {
   it('is a no-op for an empty batch', async () => {
-    const fake = createFakePool();
-    await insertRenderEvents(fake as unknown as Pool, 'p1', []);
-    expect(fake.calls).toHaveLength(0);
+    const pool = createTestPool();
+    await insertRenderEvents(pool as unknown as Pool, 'p1', []);
+    expect(pool.calls).toHaveLength(0);
   });
 
   it('builds one multi-row INSERT with 10 params per row, in order', async () => {
-    const fake = createFakePool();
-    await insertRenderEvents(fake as unknown as Pool, 'p1', [
+    const pool = createTestPool();
+    await insertRenderEvents(pool as unknown as Pool, 'p1', [
       {
         sessionId: 's1',
         componentId: 1,
@@ -103,11 +103,11 @@ describe('insertRenderEvents', () => {
       },
     ]);
 
-    expect(fake.calls).toHaveLength(1);
-    expect(fake.calls[0]?.text).toContain(
+    expect(pool.calls).toHaveLength(1);
+    expect(pool.calls[0]?.text).toContain(
       'VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10), ($11, $12, $13, $14, $15, $16, $17, $18, $19, $20)',
     );
-    expect(fake.calls[0]?.params).toEqual([
+    expect(pool.calls[0]?.params).toEqual([
       'p1',
       's1',
       1,
@@ -134,9 +134,9 @@ describe('insertRenderEvents', () => {
 
 describe('listSessions', () => {
   it('orders by started_at DESC and caps the limit at 200', async () => {
-    const fake = createFakePool();
-    await listSessions(fake as unknown as Pool, 'p1', 10_000);
-    const { text, params } = fake.calls[0]!;
+    const pool = createTestPool();
+    await listSessions(pool as unknown as Pool, 'p1', 10_000);
+    const { text, params } = pool.calls[0]!;
     expect(text).toContain('ORDER BY started_at DESC');
     expect(params).toEqual(['p1', 200]);
   });
@@ -144,9 +144,9 @@ describe('listSessions', () => {
 
 describe('listSessionComponents', () => {
   it('joins rollups to components and scopes by both session and project', async () => {
-    const fake = createFakePool();
-    await listSessionComponents(fake as unknown as Pool, 'p1', 's1');
-    const { text, params } = fake.calls[0]!;
+    const pool = createTestPool();
+    await listSessionComponents(pool as unknown as Pool, 'p1', 's1');
+    const { text, params } = pool.calls[0]!;
     expect(text).toContain('FROM session_component_rollups');
     expect(text).toContain('JOIN sessions s ON s.id = r.session_id');
     expect(text).toContain('ORDER BY r.render_count DESC');
@@ -156,14 +156,14 @@ describe('listSessionComponents', () => {
 
 describe('listRenderEvents', () => {
   it('uses a keyset condition on (ts, id), never OFFSET', async () => {
-    const fake = createFakePool();
-    await listRenderEvents(fake as unknown as Pool, {
+    const pool = createTestPool();
+    await listRenderEvents(pool as unknown as Pool, {
       sessionId: 's1',
       cursor: { ts: '2026-01-01T00:00:00.000Z', id: '100' },
       limit: 50,
     });
 
-    const { text, params } = fake.calls[0]!;
+    const { text, params } = pool.calls[0]!;
     expect(text).not.toContain('OFFSET');
     expect(text).toContain('(r.ts, r.id) < ($2, $3)');
     expect(text).toContain('ORDER BY r.ts DESC, r.id DESC');
@@ -173,61 +173,61 @@ describe('listRenderEvents', () => {
   });
 
   it('caps limit at 500 even if a larger value is requested', async () => {
-    const fake = createFakePool();
-    await listRenderEvents(fake as unknown as Pool, { sessionId: 's1', limit: 10_000 });
-    expect(fake.calls[0]?.text).toContain('LIMIT 500');
+    const pool = createTestPool();
+    await listRenderEvents(pool as unknown as Pool, { sessionId: 's1', limit: 10_000 });
+    expect(pool.calls[0]?.text).toContain('LIMIT 500');
   });
 
   it('applies from/to as ts range predicates before the cursor condition', async () => {
-    const fake = createFakePool();
-    await listRenderEvents(fake as unknown as Pool, {
+    const pool = createTestPool();
+    await listRenderEvents(pool as unknown as Pool, {
       sessionId: 's1',
       from: '2026-01-01T00:00:00.000Z',
       to: '2026-01-02T00:00:00.000Z',
     });
-    const { text, params } = fake.calls[0]!;
+    const { text, params } = pool.calls[0]!;
     expect(text).toContain('r.ts >= $2');
     expect(text).toContain('r.ts < $3');
     expect(params).toEqual(['s1', '2026-01-01T00:00:00.000Z', '2026-01-02T00:00:00.000Z']);
   });
 
   it('filters to avoidable-only renders via the partial index condition', async () => {
-    const fake = createFakePool();
-    await listRenderEvents(fake as unknown as Pool, { sessionId: 's1', avoidableOnly: true });
-    expect(fake.calls[0]?.text).toContain('r.is_avoidable = true');
+    const pool = createTestPool();
+    await listRenderEvents(pool as unknown as Pool, { sessionId: 's1', avoidableOnly: true });
+    expect(pool.calls[0]?.text).toContain('r.is_avoidable = true');
   });
 });
 
 describe('insertLongTaskEvents', () => {
   it('is a no-op for an empty batch', async () => {
-    const fake = createFakePool();
-    await insertLongTaskEvents(fake as unknown as Pool, 'p1', []);
-    expect(fake.calls).toHaveLength(0);
+    const pool = createTestPool();
+    await insertLongTaskEvents(pool as unknown as Pool, 'p1', []);
+    expect(pool.calls).toHaveLength(0);
   });
 
   it('builds one multi-row INSERT with 5 params per row, in order', async () => {
-    const fake = createFakePool();
-    await insertLongTaskEvents(fake as unknown as Pool, 'p1', [
+    const pool = createTestPool();
+    await insertLongTaskEvents(pool as unknown as Pool, 'p1', [
       { sessionId: 's1', ts: 't1', durationMs: 75, attribution: ['script'] },
     ]);
 
-    expect(fake.calls).toHaveLength(1);
-    expect(fake.calls[0]?.text).toContain('INSERT INTO long_task_events');
-    expect(fake.calls[0]?.text).toContain('VALUES ($1, $2, $3, $4, $5)');
-    expect(fake.calls[0]?.params).toEqual(['p1', 's1', 't1', 75, ['script']]);
+    expect(pool.calls).toHaveLength(1);
+    expect(pool.calls[0]?.text).toContain('INSERT INTO long_task_events');
+    expect(pool.calls[0]?.text).toContain('VALUES ($1, $2, $3, $4, $5)');
+    expect(pool.calls[0]?.params).toEqual(['p1', 's1', 't1', 75, ['script']]);
   });
 });
 
 describe('insertNetworkRequestEvents', () => {
   it('is a no-op for an empty batch', async () => {
-    const fake = createFakePool();
-    await insertNetworkRequestEvents(fake as unknown as Pool, 'p1', []);
-    expect(fake.calls).toHaveLength(0);
+    const pool = createTestPool();
+    await insertNetworkRequestEvents(pool as unknown as Pool, 'p1', []);
+    expect(pool.calls).toHaveLength(0);
   });
 
   it('builds one multi-row INSERT with 9 params per row, in order', async () => {
-    const fake = createFakePool();
-    await insertNetworkRequestEvents(fake as unknown as Pool, 'p1', [
+    const pool = createTestPool();
+    await insertNetworkRequestEvents(pool as unknown as Pool, 'p1', [
       {
         sessionId: 's1',
         ts: 't1',
@@ -240,10 +240,10 @@ describe('insertNetworkRequestEvents', () => {
       },
     ]);
 
-    expect(fake.calls).toHaveLength(1);
-    expect(fake.calls[0]?.text).toContain('INSERT INTO network_request_events');
-    expect(fake.calls[0]?.text).toContain('VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)');
-    expect(fake.calls[0]?.params).toEqual([
+    expect(pool.calls).toHaveLength(1);
+    expect(pool.calls[0]?.text).toContain('INSERT INTO network_request_events');
+    expect(pool.calls[0]?.text).toContain('VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)');
+    expect(pool.calls[0]?.params).toEqual([
       'p1',
       's1',
       't1',
@@ -259,7 +259,7 @@ describe('insertNetworkRequestEvents', () => {
 
 describe('listLongTaskEvents', () => {
   it('uses a keyset condition on (ts, id), then batches component correlation in a second query', async () => {
-    const fake = createFakePool((text) => {
+    const pool = createTestPool((text) => {
       if (text.includes('FROM long_task_events')) {
         return { rows: [{ id: '1', ts: '2026-01-01T00:00:00.000Z', durationMs: 80, attribution: [] }] };
       }
@@ -269,17 +269,17 @@ describe('listLongTaskEvents', () => {
       return { rows: [] };
     });
 
-    const tasks = await listLongTaskEvents(fake as unknown as Pool, {
+    const tasks = await listLongTaskEvents(pool as unknown as Pool, {
       sessionId: 's1',
       cursor: { ts: '2026-01-01T00:00:00.000Z', id: '100' },
       limit: 50,
     });
 
-    expect(fake.calls).toHaveLength(2);
-    expect(fake.calls[0]?.text).not.toContain('OFFSET');
-    expect(fake.calls[0]?.text).toContain('(ts, id) < ($2, $3)');
-    expect(fake.calls[1]?.text).toContain('JOIN render_events r');
-    expect(fake.calls[1]?.params).toEqual(['s1', ['1'], ['2026-01-01T00:00:00.000Z'], [80]]);
+    expect(pool.calls).toHaveLength(2);
+    expect(pool.calls[0]?.text).not.toContain('OFFSET');
+    expect(pool.calls[0]?.text).toContain('(ts, id) < ($2, $3)');
+    expect(pool.calls[1]?.text).toContain('JOIN render_events r');
+    expect(pool.calls[1]?.params).toEqual(['s1', ['1'], ['2026-01-01T00:00:00.000Z'], [80]]);
     expect(tasks).toEqual([
       {
         id: '1',
@@ -292,29 +292,29 @@ describe('listLongTaskEvents', () => {
   });
 
   it('skips the correlation query entirely when the page is empty', async () => {
-    const fake = createFakePool(() => ({ rows: [] }));
-    const tasks = await listLongTaskEvents(fake as unknown as Pool, { sessionId: 's1' });
+    const pool = createTestPool(() => ({ rows: [] }));
+    const tasks = await listLongTaskEvents(pool as unknown as Pool, { sessionId: 's1' });
     expect(tasks).toEqual([]);
-    expect(fake.calls).toHaveLength(1);
+    expect(pool.calls).toHaveLength(1);
   });
 
   it('caps limit at 500 even if a larger value is requested', async () => {
-    const fake = createFakePool();
-    await listLongTaskEvents(fake as unknown as Pool, { sessionId: 's1', limit: 10_000 });
-    expect(fake.calls[0]?.text).toContain('LIMIT 500');
+    const pool = createTestPool();
+    await listLongTaskEvents(pool as unknown as Pool, { sessionId: 's1', limit: 10_000 });
+    expect(pool.calls[0]?.text).toContain('LIMIT 500');
   });
 });
 
 describe('listNetworkRequestEvents', () => {
   it('uses a keyset condition on (ts, id), never OFFSET', async () => {
-    const fake = createFakePool();
-    await listNetworkRequestEvents(fake as unknown as Pool, {
+    const pool = createTestPool();
+    await listNetworkRequestEvents(pool as unknown as Pool, {
       sessionId: 's1',
       cursor: { ts: '2026-01-01T00:00:00.000Z', id: '100' },
       limit: 50,
     });
 
-    const { text, params } = fake.calls[0]!;
+    const { text, params } = pool.calls[0]!;
     expect(text).not.toContain('OFFSET');
     expect(text).toContain('(ts, id) < ($2, $3)');
     expect(text).toContain('ORDER BY ts DESC, id DESC');
@@ -323,34 +323,34 @@ describe('listNetworkRequestEvents', () => {
   });
 
   it('caps limit at 500 even if a larger value is requested', async () => {
-    const fake = createFakePool();
-    await listNetworkRequestEvents(fake as unknown as Pool, { sessionId: 's1', limit: 10_000 });
-    expect(fake.calls[0]?.text).toContain('LIMIT 500');
+    const pool = createTestPool();
+    await listNetworkRequestEvents(pool as unknown as Pool, { sessionId: 's1', limit: 10_000 });
+    expect(pool.calls[0]?.text).toContain('LIMIT 500');
   });
 });
 
 describe('getRenderEventDetail', () => {
   it('looks up by (session_id, ts, id) — not id alone — to stay indexed under partitioning', async () => {
-    const fake = createFakePool(() => ({
+    const pool = createTestPool(() => ({
       rows: [{ id: '1', reasonDetail: 'props.value changed' }],
     }));
     const detail = await getRenderEventDetail(
-      fake as unknown as Pool,
+      pool as unknown as Pool,
       'p1',
       's1',
       '1',
       '2026-01-01T00:00:00.000Z',
     );
 
-    expect(fake.calls[0]?.text).toContain('r.session_id = $1 AND r.ts = $2 AND r.id = $3');
-    expect(fake.calls[0]?.params).toEqual(['s1', '2026-01-01T00:00:00.000Z', '1', 'p1']);
+    expect(pool.calls[0]?.text).toContain('r.session_id = $1 AND r.ts = $2 AND r.id = $3');
+    expect(pool.calls[0]?.params).toEqual(['s1', '2026-01-01T00:00:00.000Z', '1', 'p1']);
     expect(detail?.reasonDetail).toBe('props.value changed');
   });
 
   it('returns null when no row matches', async () => {
-    const fake = createFakePool();
+    const pool = createTestPool();
     const detail = await getRenderEventDetail(
-      fake as unknown as Pool,
+      pool as unknown as Pool,
       'p1',
       's1',
       '404',

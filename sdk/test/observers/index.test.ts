@@ -3,12 +3,12 @@ import type { RenderLabRuntime } from '../../src/capture/runtime.js';
 import type { ResolvedConfig } from '../../src/config/defaultConfig.js';
 import { startObservers } from '../../src/observers/index.js';
 
-class FakePerformanceObserver {
-  static instances: FakePerformanceObserver[] = [];
+class TestPerformanceObserver {
+  static instances: TestPerformanceObserver[] = [];
   observedTypes: string[] = [];
   disconnected = false;
   constructor(_callback: (list: { getEntries: () => unknown[] }) => void) {
-    FakePerformanceObserver.instances.push(this);
+    TestPerformanceObserver.instances.push(this);
   }
   observe(options: { entryTypes: string[] }): void {
     this.observedTypes = options.entryTypes;
@@ -54,33 +54,33 @@ function makeRuntime(config: ResolvedConfig): RenderLabRuntime {
 
 describe('startObservers', () => {
   beforeEach(() => {
-    FakePerformanceObserver.instances = [];
-    vi.stubGlobal('PerformanceObserver', FakePerformanceObserver);
+    TestPerformanceObserver.instances = [];
+    vi.stubGlobal('PerformanceObserver', TestPerformanceObserver);
   });
   afterEach(() => vi.unstubAllGlobals());
 
   it('starts both observers by default', () => {
     startObservers(makeRuntime(makeConfig()));
-    expect(FakePerformanceObserver.instances).toHaveLength(2);
-    const observedTypes = FakePerformanceObserver.instances.map((o) => o.observedTypes[0]);
+    expect(TestPerformanceObserver.instances).toHaveLength(2);
+    const observedTypes = TestPerformanceObserver.instances.map((o) => o.observedTypes[0]);
     expect(observedTypes).toEqual(expect.arrayContaining(['longtask', 'resource']));
   });
 
   it('skips the long-task observer when longTasks.enabled is false', () => {
     startObservers(makeRuntime(makeConfig({ longTasks: { enabled: false } })));
-    expect(FakePerformanceObserver.instances).toHaveLength(1);
-    expect(FakePerformanceObserver.instances[0]?.observedTypes).toEqual(['resource']);
+    expect(TestPerformanceObserver.instances).toHaveLength(1);
+    expect(TestPerformanceObserver.instances[0]?.observedTypes).toEqual(['resource']);
   });
 
   it('skips the network observer when network.enabled is false', () => {
     startObservers(makeRuntime(makeConfig({ network: { enabled: false, ignoreUrls: [] } })));
-    expect(FakePerformanceObserver.instances).toHaveLength(1);
-    expect(FakePerformanceObserver.instances[0]?.observedTypes).toEqual(['longtask']);
+    expect(TestPerformanceObserver.instances).toHaveLength(1);
+    expect(TestPerformanceObserver.instances[0]?.observedTypes).toEqual(['longtask']);
   });
 
   it('the returned disposer disconnects every started observer', () => {
     const dispose = startObservers(makeRuntime(makeConfig()));
     dispose();
-    expect(FakePerformanceObserver.instances.every((o) => o.disconnected)).toBe(true);
+    expect(TestPerformanceObserver.instances.every((o) => o.disconnected)).toBe(true);
   });
 });

@@ -1,10 +1,18 @@
 import type { FastifyInstance } from 'fastify';
 import type { Pool } from 'pg';
 import { createProject } from '../db/repository.js';
+import { checkRateLimit } from '../redis/rateLimit.js';
+import { redisKeys } from '../redis/keys.js';
+import type { RedisLike } from '../redis/hotPath.js';
 
 const MAX_NAME_LENGTH = 200;
 const MAX_EMAIL_LENGTH = 320;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+const SIGNUP_RATE_LIMIT = Number(process.env.SIGNUP_RATE_LIMIT_MAX ?? 10);
+const SIGNUP_RATE_LIMIT_WINDOW_SECONDS = Number(
+  process.env.SIGNUP_RATE_LIMIT_WINDOW_SECONDS ?? 900,
+);
 
 interface CreateProjectBody {
   name?: string;
@@ -13,12 +21,26 @@ interface CreateProjectBody {
 
 export interface ProjectRouteDeps {
   pool: Pool;
+  redis: RedisLike;
 }
 
 export function registerProjectRoutes(app: FastifyInstance, deps: ProjectRouteDeps): void {
-  const { pool } = deps;
+  const { pool, redis } = deps;
 
   app.post<{ Body: CreateProjectBody }>('/api/projects', async (request, reply) => {
+    const rateLimit = await checkRateLimit(
+      redis,
+      redisKeys.rateLimitSignup(request.ip),
+      SIGNUP_RATE_LIMIT,
+      SIGNUP_RATE_LIMIT_WINDOW_SECONDS,
+    );
+    if (!rateLimit.allowed) {
+      return reply
+        .code(429)
+        .header('Retry-After', rateLimit.retryAfterSeconds)
+        .send({ error: 'too many projects created from this address, try again later' });
+    }
+
     const name = request.body?.name?.trim();
     const email = request.body?.email?.trim();
 

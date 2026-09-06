@@ -4,12 +4,12 @@ import type { RenderLabRuntime } from '../../src/capture/runtime.js';
 import type { ResolvedConfig } from '../../src/config/defaultConfig.js';
 import { startNetworkObserver } from '../../src/observers/networkObserver.js';
 
-class FakePerformanceObserver {
-  static instances: FakePerformanceObserver[] = [];
+class TestPerformanceObserver {
+  static instances: TestPerformanceObserver[] = [];
   observedTypes: string[] = [];
   disconnected = false;
   constructor(private readonly callback: (list: { getEntries: () => unknown[] }) => void) {
-    FakePerformanceObserver.instances.push(this);
+    TestPerformanceObserver.instances.push(this);
   }
   observe(options: { entryTypes: string[] }): void {
     this.observedTypes = options.entryTypes;
@@ -59,8 +59,8 @@ function makeRuntime(overrides: Partial<RenderLabRuntime> = {}): RenderLabRuntim
 
 describe('startNetworkObserver', () => {
   beforeEach(() => {
-    FakePerformanceObserver.instances = [];
-    vi.stubGlobal('PerformanceObserver', FakePerformanceObserver);
+    TestPerformanceObserver.instances = [];
+    vi.stubGlobal('PerformanceObserver', TestPerformanceObserver);
   });
   afterEach(() => vi.unstubAllGlobals());
 
@@ -74,13 +74,13 @@ describe('startNetworkObserver', () => {
   it('observes the resource entry type', () => {
     const runtime = makeRuntime();
     startNetworkObserver(runtime);
-    expect(FakePerformanceObserver.instances[0]?.observedTypes).toEqual(['resource']);
+    expect(TestPerformanceObserver.instances[0]?.observedTypes).toEqual(['resource']);
   });
 
   it('captures fetch/xhr entries and ignores other initiator types', () => {
     const runtime = makeRuntime();
     startNetworkObserver(runtime);
-    const observer = FakePerformanceObserver.instances[0];
+    const observer = TestPerformanceObserver.instances[0];
     if (!observer) throw new Error('observer not created');
 
     observer.emit([
@@ -107,7 +107,7 @@ describe('startNetworkObserver', () => {
   it('ignores requests to the SDK endpoint', () => {
     const runtime = makeRuntime({ config: makeConfig({ endpoint: 'https://ingest.example.com' }) });
     startNetworkObserver(runtime);
-    const observer = FakePerformanceObserver.instances[0];
+    const observer = TestPerformanceObserver.instances[0];
     if (!observer) throw new Error('observer not created');
 
     observer.emit([
@@ -125,7 +125,7 @@ describe('startNetworkObserver', () => {
   it('ignores requests matching a configured ignoreUrls pattern', () => {
     const runtime = makeRuntime({ config: makeConfig({ network: { enabled: true, ignoreUrls: [/analytics/] } }) });
     startNetworkObserver(runtime);
-    const observer = FakePerformanceObserver.instances[0];
+    const observer = TestPerformanceObserver.instances[0];
     if (!observer) throw new Error('observer not created');
 
     observer.emit([
@@ -138,7 +138,7 @@ describe('startNetworkObserver', () => {
   it('omits status/transferSize when reported as 0 (unavailable)', () => {
     const runtime = makeRuntime();
     startNetworkObserver(runtime);
-    const observer = FakePerformanceObserver.instances[0];
+    const observer = TestPerformanceObserver.instances[0];
     if (!observer) throw new Error('observer not created');
 
     observer.emit([
@@ -161,6 +161,6 @@ describe('startNetworkObserver', () => {
     const runtime = makeRuntime();
     const dispose = startNetworkObserver(runtime);
     dispose();
-    expect(FakePerformanceObserver.instances[0]?.disconnected).toBe(true);
+    expect(TestPerformanceObserver.instances[0]?.disconnected).toBe(true);
   });
 });
