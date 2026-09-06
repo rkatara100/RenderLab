@@ -9,6 +9,7 @@ import type {
   SessionSummary,
 } from '@renderlab/shared-types';
 import { buildServer } from '../src/server.js';
+import { redisKeys } from '../src/redis/keys.js';
 import { createTestRedis } from './doubles.js';
 
 const API_KEY = 'test-project-api-key-0001';
@@ -88,6 +89,21 @@ describe('GET /api/sessions', () => {
     expect(res.statusCode).toBe(401);
   });
 
+  it('rate-limits a project once it exceeds its per-minute read budget (default: 120/min)', async () => {
+    const redis = createTestRedis();
+    redis.store.set(redisKeys.rateLimitRead('proj-1'), 120);
+    const app = buildServer({ pool: createPool() as unknown as Pool, redis });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/sessions',
+      headers: { authorization: `Bearer ${API_KEY}` },
+    });
+
+    expect(res.statusCode).toBe(429);
+    expect(res.headers['retry-after']).toBeDefined();
+  });
+
   it('returns sessions with a derived isLive flag', async () => {
     const now = new Date().toISOString();
     const stale = new Date(Date.now() - 120_000).toISOString();
@@ -142,7 +158,7 @@ describe('GET /api/sessions', () => {
 describe('GET /api/sessions/:sessionId/components', () => {
   it('requires a valid API key', async () => {
     const app = buildServer({ pool: createPool() as unknown as Pool, redis: createTestRedis() });
-    const res = await app.inject({ method: 'GET', url: '/api/sessions/s1/components' });
+    const res = await app.inject({ method: 'GET', url: '/api/sessions/11111111-1111-1111-1111-111111111111/components' });
     expect(res.statusCode).toBe(401);
   });
 
@@ -165,7 +181,7 @@ describe('GET /api/sessions/:sessionId/components', () => {
 
     const res = await app.inject({
       method: 'GET',
-      url: '/api/sessions/s1/components',
+      url: '/api/sessions/11111111-1111-1111-1111-111111111111/components',
       headers: { authorization: `Bearer ${API_KEY}` },
     });
     expect(res.statusCode).toBe(200);
@@ -178,8 +194,50 @@ describe('GET /api/sessions/:sessionId/components', () => {
 describe('GET /api/sessions/:sessionId/events', () => {
   it('requires a valid API key', async () => {
     const app = buildServer({ pool: createPool() as unknown as Pool, redis: createTestRedis() });
-    const res = await app.inject({ method: 'GET', url: '/api/sessions/s1/events' });
+    const res = await app.inject({ method: 'GET', url: '/api/sessions/11111111-1111-1111-1111-111111111111/events' });
     expect(res.statusCode).toBe(401);
+  });
+
+  it('rejects a non-UUID sessionId with a clean 422, not a raw DB error', async () => {
+    const app = buildServer({ pool: createPool() as unknown as Pool, redis: createTestRedis() });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/sessions/not-a-uuid/events',
+      headers: { authorization: `Bearer ${API_KEY}` },
+    });
+    expect(res.statusCode).toBe(422);
+  });
+
+  it('rejects a negative limit with a clean 422', async () => {
+    const app = buildServer({ pool: createPool() as unknown as Pool, redis: createTestRedis() });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/sessions/11111111-1111-1111-1111-111111111111/events?limit=-5',
+      headers: { authorization: `Bearer ${API_KEY}` },
+    });
+    expect(res.statusCode).toBe(422);
+  });
+
+  it('treats limit=0 as zero rows, not the default page size', async () => {
+    const pool = createPool({ eventRows: [makeEventRow()] });
+    const app = buildServer({ pool: pool as unknown as Pool, redis: createTestRedis() });
+    await app.inject({
+      method: 'GET',
+      url: '/api/sessions/11111111-1111-1111-1111-111111111111/events?limit=0',
+      headers: { authorization: `Bearer ${API_KEY}` },
+    });
+    const eventsCall = pool.calls.find((c) => c.text.includes('FROM render_events'));
+    expect(eventsCall?.text).toContain('LIMIT 0');
+  });
+
+  it('rejects a non-numeric componentId with a clean 422', async () => {
+    const app = buildServer({ pool: createPool() as unknown as Pool, redis: createTestRedis() });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/sessions/11111111-1111-1111-1111-111111111111/events?componentId=notanumber',
+      headers: { authorization: `Bearer ${API_KEY}` },
+    });
+    expect(res.statusCode).toBe(422);
   });
 
   it('decodes the numeric render_reason back to the SDK string union', async () => {
@@ -188,7 +246,7 @@ describe('GET /api/sessions/:sessionId/events', () => {
 
     const res = await app.inject({
       method: 'GET',
-      url: '/api/sessions/s1/events',
+      url: '/api/sessions/11111111-1111-1111-1111-111111111111/events',
       headers: { authorization: `Bearer ${API_KEY}` },
     });
     expect(res.statusCode).toBe(200);
@@ -205,7 +263,7 @@ describe('GET /api/sessions/:sessionId/events', () => {
 
     const fullPage = await app.inject({
       method: 'GET',
-      url: '/api/sessions/s1/events?limit=3',
+      url: '/api/sessions/11111111-1111-1111-1111-111111111111/events?limit=3',
       headers: { authorization: `Bearer ${API_KEY}` },
     });
     const { nextCursor } = fullPage.json<RenderTimelinePage>();
@@ -213,7 +271,7 @@ describe('GET /api/sessions/:sessionId/events', () => {
 
     const partialPage = await app.inject({
       method: 'GET',
-      url: '/api/sessions/s1/events?limit=10',
+      url: '/api/sessions/11111111-1111-1111-1111-111111111111/events?limit=10',
       headers: { authorization: `Bearer ${API_KEY}` },
     });
     expect(partialPage.json<RenderTimelinePage>().nextCursor).toBeNull();
@@ -225,7 +283,7 @@ describe('GET /api/sessions/:sessionId/events', () => {
 
     await app.inject({
       method: 'GET',
-      url: '/api/sessions/s1/events?cursorTs=2026-01-01T00%3A00%3A00.000Z&cursorId=42',
+      url: '/api/sessions/11111111-1111-1111-1111-111111111111/events?cursorTs=2026-01-01T00%3A00%3A00.000Z&cursorId=42',
       headers: { authorization: `Bearer ${API_KEY}` },
     });
 
@@ -240,7 +298,7 @@ describe('GET /api/sessions/:sessionId/events', () => {
 
     await app.inject({
       method: 'GET',
-      url: '/api/sessions/s1/events?avoidableOnly=true',
+      url: '/api/sessions/11111111-1111-1111-1111-111111111111/events?avoidableOnly=true',
       headers: { authorization: `Bearer ${API_KEY}` },
     });
 
@@ -254,7 +312,7 @@ describe('GET /api/sessions/:sessionId/events', () => {
 
     await app.inject({
       method: 'GET',
-      url: '/api/sessions/s1/events?search=SearchBox',
+      url: '/api/sessions/11111111-1111-1111-1111-111111111111/events?search=SearchBox',
       headers: { authorization: `Bearer ${API_KEY}` },
     });
 
@@ -269,7 +327,7 @@ describe('GET /api/sessions/:sessionId/events', () => {
 
     await app.inject({
       method: 'GET',
-      url: '/api/sessions/s1/events?renderReason=props-changed,parent-rerender',
+      url: '/api/sessions/11111111-1111-1111-1111-111111111111/events?renderReason=props-changed,parent-rerender',
       headers: { authorization: `Bearer ${API_KEY}` },
     });
 
@@ -284,7 +342,7 @@ describe('GET /api/sessions/:sessionId/events', () => {
 
     await app.inject({
       method: 'GET',
-      url: '/api/sessions/s1/events?renderReason=not-a-real-reason',
+      url: '/api/sessions/11111111-1111-1111-1111-111111111111/events?renderReason=not-a-real-reason',
       headers: { authorization: `Bearer ${API_KEY}` },
     });
 
@@ -298,7 +356,7 @@ describe('GET /api/sessions/:sessionId/events/:eventId', () => {
     const app = buildServer({ pool: createPool() as unknown as Pool, redis: createTestRedis() });
     const res = await app.inject({
       method: 'GET',
-      url: '/api/sessions/s1/events/1?ts=2026-01-01T00:00:00.000Z',
+      url: '/api/sessions/11111111-1111-1111-1111-111111111111/events/1?ts=2026-01-01T00:00:00.000Z',
     });
     expect(res.statusCode).toBe(401);
   });
@@ -307,7 +365,7 @@ describe('GET /api/sessions/:sessionId/events/:eventId', () => {
     const app = buildServer({ pool: createPool() as unknown as Pool, redis: createTestRedis() });
     const res = await app.inject({
       method: 'GET',
-      url: '/api/sessions/s1/events/1',
+      url: '/api/sessions/11111111-1111-1111-1111-111111111111/events/1',
       headers: { authorization: `Bearer ${API_KEY}` },
     });
     expect(res.statusCode).toBe(422);
@@ -318,7 +376,7 @@ describe('GET /api/sessions/:sessionId/events/:eventId', () => {
     const app = buildServer({ pool: pool as unknown as Pool, redis: createTestRedis() });
     const res = await app.inject({
       method: 'GET',
-      url: '/api/sessions/s1/events/999?ts=2026-01-01T00:00:00.000Z',
+      url: '/api/sessions/11111111-1111-1111-1111-111111111111/events/999?ts=2026-01-01T00:00:00.000Z',
       headers: { authorization: `Bearer ${API_KEY}` },
     });
     expect(res.statusCode).toBe(404);
@@ -335,7 +393,7 @@ describe('GET /api/sessions/:sessionId/events/:eventId', () => {
         componentId: 1,
         componentName: 'SearchBox',
         reasonDetail: 'props.value changed',
-        propsDiff: JSON.stringify([
+        propsDiff: [
           {
             key: 'value',
             prevValue: 1,
@@ -344,7 +402,7 @@ describe('GET /api/sessions/:sessionId/events/:eventId', () => {
             shallowEqual: false,
             valueType: 'primitive',
           },
-        ]),
+        ],
         contextDiff: null,
       },
     });
@@ -352,7 +410,7 @@ describe('GET /api/sessions/:sessionId/events/:eventId', () => {
 
     const res = await app.inject({
       method: 'GET',
-      url: '/api/sessions/s1/events/1?ts=2026-01-01T00:00:00.000Z',
+      url: '/api/sessions/11111111-1111-1111-1111-111111111111/events/1?ts=2026-01-01T00:00:00.000Z',
       headers: { authorization: `Bearer ${API_KEY}` },
     });
     expect(res.statusCode).toBe(200);
@@ -376,7 +434,7 @@ describe('GET /api/sessions/:sessionId/events/:eventId', () => {
 describe('GET /api/sessions/:sessionId/long-tasks', () => {
   it('requires a valid API key', async () => {
     const app = buildServer({ pool: createPool() as unknown as Pool, redis: createTestRedis() });
-    const res = await app.inject({ method: 'GET', url: '/api/sessions/s1/long-tasks' });
+    const res = await app.inject({ method: 'GET', url: '/api/sessions/11111111-1111-1111-1111-111111111111/long-tasks' });
     expect(res.statusCode).toBe(401);
   });
 
@@ -391,7 +449,7 @@ describe('GET /api/sessions/:sessionId/long-tasks', () => {
 
     const res = await app.inject({
       method: 'GET',
-      url: '/api/sessions/s1/long-tasks',
+      url: '/api/sessions/11111111-1111-1111-1111-111111111111/long-tasks',
       headers: { authorization: `Bearer ${API_KEY}` },
     });
     expect(res.statusCode).toBe(200);
@@ -412,7 +470,7 @@ describe('GET /api/sessions/:sessionId/long-tasks', () => {
 
     const res = await app.inject({
       method: 'GET',
-      url: '/api/sessions/s1/long-tasks?limit=3',
+      url: '/api/sessions/11111111-1111-1111-1111-111111111111/long-tasks?limit=3',
       headers: { authorization: `Bearer ${API_KEY}` },
     });
     const { nextCursor } = res.json<LongTaskPage>();
@@ -423,7 +481,7 @@ describe('GET /api/sessions/:sessionId/long-tasks', () => {
 describe('GET /api/sessions/:sessionId/network-requests', () => {
   it('requires a valid API key', async () => {
     const app = buildServer({ pool: createPool() as unknown as Pool, redis: createTestRedis() });
-    const res = await app.inject({ method: 'GET', url: '/api/sessions/s1/network-requests' });
+    const res = await app.inject({ method: 'GET', url: '/api/sessions/11111111-1111-1111-1111-111111111111/network-requests' });
     expect(res.statusCode).toBe(401);
   });
 
@@ -446,7 +504,7 @@ describe('GET /api/sessions/:sessionId/network-requests', () => {
 
     const res = await app.inject({
       method: 'GET',
-      url: '/api/sessions/s1/network-requests',
+      url: '/api/sessions/11111111-1111-1111-1111-111111111111/network-requests',
       headers: { authorization: `Bearer ${API_KEY}` },
     });
     expect(res.statusCode).toBe(200);
@@ -462,7 +520,7 @@ describe('GET /api/sessions/:sessionId/network-requests', () => {
 
     await app.inject({
       method: 'GET',
-      url: '/api/sessions/s1/network-requests?cursorTs=2026-01-01T00%3A00%3A00.000Z&cursorId=42',
+      url: '/api/sessions/11111111-1111-1111-1111-111111111111/network-requests?cursorTs=2026-01-01T00%3A00%3A00.000Z&cursorId=42',
       headers: { authorization: `Bearer ${API_KEY}` },
     });
 

@@ -40,10 +40,14 @@ export class BatchQueue implements EventSink {
 
   flush(): void {
     if (this.buffer.length === 0) return;
+    this.options.onFlush(this.drain());
+  }
+
+  drain(): TelemetryEvent[] {
     const batch = this.buffer;
     this.buffer = [];
     this.bytes = 0;
-    this.options.onFlush(batch);
+    return batch;
   }
 
   get size(): number {

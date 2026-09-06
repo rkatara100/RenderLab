@@ -15,16 +15,16 @@ export interface ServerDeps {
 
 function corsOrigin(): boolean | string[] {
   const raw = process.env.CORS_ORIGINS;
-  if (!raw) return true;
+  if (!raw) return false;
   const list = raw
     .split(',')
     .map((origin) => origin.trim())
     .filter(Boolean);
-  return list.length > 0 ? list : true;
+  return list.length > 0 ? list : false;
 }
 
 export function buildServer(deps: ServerDeps = {}): FastifyInstance {
-  const app = Fastify({ logger: false, trustProxy: true });
+  const app = Fastify({ logger: false, trustProxy: (_address, hop) => hop === 0 });
   const pool = deps.pool ?? getPool();
   const redis = deps.redis ?? getRedis();
 

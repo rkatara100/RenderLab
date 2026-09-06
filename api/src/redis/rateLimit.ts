@@ -14,9 +14,7 @@ export async function checkRateLimit(
   windowSeconds: number,
 ): Promise<RateLimitResult> {
   const count = await redis.incrby(key, 1);
-  if (count === 1) {
-    await redis.expire(key, windowSeconds);
-  }
+  await redis.expire(key, windowSeconds);
 
   return {
     allowed: count <= limit,

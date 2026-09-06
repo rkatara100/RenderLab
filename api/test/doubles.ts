@@ -43,6 +43,12 @@ export function createTestRedis(): RedisLike & { store: Map<string, unknown> } {
     hashes.set(key, hash);
     return Promise.resolve(next);
   };
+  const hset: RedisLike['hset'] = (key, kv) => {
+    const hash = hashes.get(key) ?? new Map<string, number>();
+    for (const [field, value] of Object.entries(kv)) hash.set(field, Number(value));
+    hashes.set(key, hash);
+    return Promise.resolve(Object.keys(kv).length);
+  };
   const expire: RedisLike['expire'] = () => Promise.resolve(1);
   const hgetall: RedisLike['hgetall'] = (key) => {
     const hash = hashes.get(key);
@@ -59,5 +65,5 @@ export function createTestRedis(): RedisLike & { store: Map<string, unknown> } {
     return Promise.resolve(count);
   };
 
-  return { store, set, incrby, hincrby, expire, hgetall, del };
+  return { store, set, incrby, hincrby, hset, expire, hgetall, del };
 }

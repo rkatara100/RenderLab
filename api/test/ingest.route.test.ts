@@ -284,6 +284,54 @@ describe('POST /api/ingest/events', () => {
     expect(res.statusCode).toBe(429);
     expect(res.headers['retry-after']).toBeDefined();
   });
+
+  it('clears the idempotency marker on failure so a retry can actually persist', async () => {
+    const redis = createTestRedis();
+    let shouldFail = true;
+    const calls: { text: string; params: unknown[] }[] = [];
+    let componentSeq = 0;
+    const query = async (text: string, params: unknown[] = []) => {
+      calls.push({ text, params });
+      if (text.includes('FROM projects')) {
+        return { rows: [{ id: 'proj-1', api_key: API_KEY, is_active: true }] };
+      }
+      if (text.includes('INSERT INTO sessions')) {
+        return { rows: [{ id: 'sess-1' }] };
+      }
+      if (text.includes('INSERT INTO components')) {
+        componentSeq += 1;
+        return { rows: [{ id: componentSeq }] };
+      }
+      if (text.includes('INSERT INTO render_events') && shouldFail) {
+        shouldFail = false;
+        throw new Error('simulated DB failure');
+      }
+      return { rows: [] };
+    };
+    const pool = { calls, query, connect: async () => ({ query, release: () => {} }) };
+    const app = buildServer({ pool: pool as unknown as Pool, redis });
+
+    const payload = makeBatchBody([makeRenderEvent()], 'batch-retry');
+
+    const first = await app.inject({
+      method: 'POST',
+      url: '/api/ingest/events',
+      headers: { authorization: `Bearer ${API_KEY}` },
+      payload,
+    });
+    expect(first.statusCode).toBe(500);
+
+    const second = await app.inject({
+      method: 'POST',
+      url: '/api/ingest/events',
+      headers: { authorization: `Bearer ${API_KEY}` },
+      payload,
+    });
+    expect(second.statusCode).toBe(202);
+
+    const insertCalls = calls.filter((c) => c.text.includes('INSERT INTO render_events'));
+    expect(insertCalls).toHaveLength(2);
+  });
 });
 
 describe('POST /api/ingest/session-end', () => {

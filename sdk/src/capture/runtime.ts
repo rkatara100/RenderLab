@@ -31,16 +31,44 @@ export function createRuntime(config: RenderLabConfig): RenderLabRuntime {
       if (!sampled) return;
       try {
         const serialized = events.map((event) => serializeEvent(event, resolved));
-        sendBatch(
+        void sendBatch(
           serialized,
           { sessionId, startedAt: sessionStartedAt },
           { endpoint: resolved.endpoint, apiKey: resolved.apiKey, mode: resolved.transport },
-        );
+        ).catch((cause: unknown) => {
+          resolved.onError({ message: 'RenderLab: failed to send batch', cause });
+        });
       } catch (cause) {
         resolved.onError({ message: 'RenderLab: failed to flush batch', cause });
       }
     },
   });
+
+  function flushForUnload(): void {
+    if (!sampled) return;
+    const events = queue.drain();
+    if (events.length === 0) return;
+    try {
+      const serialized = events.map((event) => serializeEvent(event, resolved));
+      void sendBatch(
+        serialized,
+        { sessionId, startedAt: sessionStartedAt },
+        { endpoint: resolved.endpoint, apiKey: resolved.apiKey, mode: 'beacon' },
+      ).catch((cause: unknown) => {
+        resolved.onError({ message: 'RenderLab: failed to flush batch on unload', cause });
+      });
+    } catch (cause) {
+      resolved.onError({ message: 'RenderLab: failed to flush batch on unload', cause });
+    }
+  }
+
+  const visibilityHandler = (): void => {
+    if (typeof document !== 'undefined' && document.hidden) flushForUnload();
+  };
+  const hasDocument = typeof document !== 'undefined';
+  const hasWindow = typeof window !== 'undefined';
+  if (hasDocument) document.addEventListener('visibilitychange', visibilityHandler);
+  if (hasWindow) window.addEventListener('pagehide', flushForUnload);
 
   const runtime: RenderLabRuntime = {
     config: resolved,
@@ -52,7 +80,12 @@ export function createRuntime(config: RenderLabConfig): RenderLabRuntime {
     nextSequence: () => (sequence += 1),
     stopObservers: () => {},
   };
-  runtime.stopObservers = startObservers(runtime);
+  const stopObserverInstrumentation = startObservers(runtime);
+  runtime.stopObservers = () => {
+    stopObserverInstrumentation();
+    if (hasDocument) document.removeEventListener('visibilitychange', visibilityHandler);
+    if (hasWindow) window.removeEventListener('pagehide', flushForUnload);
+  };
   return runtime;
 }
 

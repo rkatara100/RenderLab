@@ -41,7 +41,7 @@ function makeReplayRow(overrides: Partial<Record<string, unknown>> = {}) {
 describe('GET /api/sessions/:sessionId/replay', () => {
   it('requires a valid API key', async () => {
     const app = buildServer({ pool: createPool() as unknown as Pool, redis: createTestRedis() });
-    const res = await app.inject({ method: 'GET', url: '/api/sessions/s1/replay' });
+    const res = await app.inject({ method: 'GET', url: '/api/sessions/11111111-1111-1111-1111-111111111111/replay' });
     expect(res.statusCode).toBe(401);
   });
 
@@ -51,7 +51,7 @@ describe('GET /api/sessions/:sessionId/replay', () => {
 
     const res = await app.inject({
       method: 'GET',
-      url: '/api/sessions/s1/replay',
+      url: '/api/sessions/11111111-1111-1111-1111-111111111111/replay',
       headers: { authorization: `Bearer ${API_KEY}` },
     });
 
@@ -77,7 +77,7 @@ describe('GET /api/sessions/:sessionId/replay', () => {
 
     const res = await app.inject({
       method: 'GET',
-      url: '/api/sessions/s1/replay',
+      url: '/api/sessions/11111111-1111-1111-1111-111111111111/replay',
       headers: { authorization: `Bearer ${API_KEY}` },
     });
 
@@ -94,7 +94,7 @@ describe('GET /api/sessions/:sessionId/replay', () => {
 
     const res = await app.inject({
       method: 'GET',
-      url: '/api/sessions/s1/replay',
+      url: '/api/sessions/11111111-1111-1111-1111-111111111111/replay',
       headers: { authorization: `Bearer ${API_KEY}` },
     });
 
