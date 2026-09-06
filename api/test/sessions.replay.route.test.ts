@@ -3,6 +3,7 @@ import type { Pool } from 'pg';
 import type { ReplayEventsResponse } from '@renderlab/shared-types';
 import { buildServer } from '../src/server.js';
 import { redisKeys } from '../src/redis/keys.js';
+import { hashApiKey } from '../src/db/repository.js';
 import { createTestRedis } from './doubles.js';
 
 const API_KEY = 'test-project-api-key-0001';
@@ -12,7 +13,7 @@ function createPool(eventRows: unknown[] = []) {
   const query = async (text: string, params: unknown[] = []) => {
     calls.push({ text, params });
     if (text.includes('FROM projects')) {
-      return { rows: [{ id: 'proj-1', api_key: API_KEY, is_active: true }] };
+      return { rows: [{ id: 'proj-1', key_hash: hashApiKey(API_KEY), is_active: true }] };
     }
     if (text.includes('FROM render_events')) {
       return { rows: eventRows };

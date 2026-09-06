@@ -6,14 +6,15 @@ import { useSettingsStore } from '../../stores/useSettingsStore';
 
 interface CreateProjectResponse {
   id: string;
-  apiKey: string;
+  ingestKey: string;
+  dashboardKey: string;
 }
 
 export default function SignupPage(): React.JSX.Element {
   const { apiBaseUrl, setApiBaseUrl, setApiKey } = useSettingsStore();
   const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [createdApiKey, setCreatedApiKey] = useState<string | null>(null);
+  const [createdKeys, setCreatedKeys] = useState<CreateProjectResponse | null>(null);
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>): Promise<void> => {
     e.preventDefault();
@@ -44,8 +45,8 @@ export default function SignupPage(): React.JSX.Element {
 
       const project = (await response.json()) as CreateProjectResponse;
       setApiBaseUrl(baseUrl);
-      setApiKey(project.apiKey);
-      setCreatedApiKey(project.apiKey);
+      setApiKey(project.dashboardKey);
+      setCreatedKeys(project);
       setStatus('idle');
     } catch {
       setErrorMessage('Could not reach the RenderLab API. Check the API base URL.');
@@ -53,19 +54,30 @@ export default function SignupPage(): React.JSX.Element {
     }
   };
 
-  if (createdApiKey) {
+  if (createdKeys) {
     return (
       <div className="page">
         <header className="page__header">
           <h1>You&rsquo;re all set</h1>
         </header>
-        <p>Your project&rsquo;s API key (also saved to Settings in this browser):</p>
+        <p>Two keys, two different jobs — copy both now, they&rsquo;re shown only once:</p>
+        <p>
+          <strong>Ingest key</strong> — give this to your app&rsquo;s RenderLab SDK. It can only send
+          data in, never read it back.
+        </p>
         <p className="settings-form__status">
-          <code>{createdApiKey}</code>
+          <code>{createdKeys.ingestKey}</code>
         </p>
         <p>
-          Pass it to the SDK&rsquo;s <code>init({'{'} apiKey {'}'})</code>, or head to{' '}
-          <Link href="/settings">Settings</Link> to confirm it&rsquo;s there.
+          <strong>Dashboard key</strong> — what this dashboard uses to read your data. Already saved
+          to Settings in this browser; never put this one in your app&rsquo;s code.
+        </p>
+        <p className="settings-form__status">
+          <code>{createdKeys.dashboardKey}</code>
+        </p>
+        <p>
+          Pass the ingest key to the SDK&rsquo;s <code>init({'{'} apiKey {'}'})</code>, or head to{' '}
+          <Link href="/settings">Settings</Link> to confirm the dashboard key is there.
         </p>
       </div>
     );

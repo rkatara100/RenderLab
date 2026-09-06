@@ -24,14 +24,14 @@ export default function SettingsPage(): React.JSX.Element {
       </header>
       <p>
         RenderLab has no multi-user login yet (ARCHITECTURE.md §3.5) — the dashboard authenticates
-        to the API with the same project API key your app&rsquo;s SDK uses. Paste it below;
-        it&rsquo;s stored only in this browser.
+        with your project&rsquo;s <strong>dashboard key</strong>, a different key from the one your
+        app&rsquo;s SDK uses to send data. Paste it below; it&rsquo;s stored only in this browser.
       </p>
       <form onSubmit={handleSubmit} className="settings-form">
         <label htmlFor="apiBaseUrl">API base URL</label>
         <input id="apiBaseUrl" name="apiBaseUrl" type="url" defaultValue={apiBaseUrl} required />
 
-        <label htmlFor="apiKey">Project API key</label>
+        <label htmlFor="apiKey">Dashboard key</label>
         <input
           id="apiKey"
           name="apiKey"

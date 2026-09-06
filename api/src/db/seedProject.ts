@@ -24,7 +24,8 @@ async function main(): Promise<void> {
   const project = await createProject(pool, name, email);
 
   console.log(`Created project ${project.id} ("${name}")`);
-  console.log(`API key: ${project.apiKey}`);
+  console.log(`Ingest key (give to the SDK):    ${project.ingestKey}`);
+  console.log(`Dashboard key (paste in Settings): ${project.dashboardKey}`);
 
   await closePool();
 }

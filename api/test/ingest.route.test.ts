@@ -3,6 +3,7 @@ import type { Pool } from 'pg';
 import type { LongTaskEvent, NetworkRequestEvent, RenderEvent, TelemetryEvent } from '@renderlab/shared-types';
 import { buildServer } from '../src/server.js';
 import { redisKeys } from '../src/redis/keys.js';
+import { hashApiKey } from '../src/db/repository.js';
 import { createTestRedis } from './doubles.js';
 
 const API_KEY = 'test-project-api-key-0001';
@@ -14,7 +15,7 @@ function createPool() {
   const query = async (text: string, params: unknown[] = []) => {
     calls.push({ text, params });
     if (text.includes('FROM projects')) {
-      return { rows: [{ id: 'proj-1', api_key: API_KEY, is_active: true }] };
+      return { rows: [{ id: 'proj-1', key_hash: hashApiKey(API_KEY), is_active: true }] };
     }
     if (text.includes('INSERT INTO sessions')) {
       return { rows: [{ id: 'sess-1' }] };
@@ -293,7 +294,7 @@ describe('POST /api/ingest/events', () => {
     const query = async (text: string, params: unknown[] = []) => {
       calls.push({ text, params });
       if (text.includes('FROM projects')) {
-        return { rows: [{ id: 'proj-1', api_key: API_KEY, is_active: true }] };
+        return { rows: [{ id: 'proj-1', key_hash: hashApiKey(API_KEY), is_active: true }] };
       }
       if (text.includes('INSERT INTO sessions')) {
         return { rows: [{ id: 'sess-1' }] };

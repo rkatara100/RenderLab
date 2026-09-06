@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { randomBytes, createHash, timingSafeEqual } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 import type { ContextDiffEntry, PropDiffEntry } from '@renderlab/shared-types';
 import { ensureDailyPartition } from './partitions.js';
@@ -16,38 +16,89 @@ export interface Project {
   isActive: boolean;
 }
 
-export interface NewProject {
+export interface NewProjectKeys {
   id: string;
-  apiKey: string;
+  ingestKey: string;
+  dashboardKey: string;
 }
+
+export type ApiKeyScope = 'ingest' | 'dashboard';
 
 export function makeApiKey(): string {
   return `rl_${randomBytes(24).toString('hex')}`;
 }
 
-export async function createProject(pool: Pool, name: string, ownerEmail: string): Promise<NewProject> {
-  const apiKey = makeApiKey();
-  const apiKeyPrefix = apiKey.slice(0, 8);
+export function hashApiKey(key: string): string {
+  return createHash('sha256').update(key).digest('hex');
+}
+
+export async function createProject(
+  pool: Pool,
+  name: string,
+  ownerEmail: string,
+): Promise<NewProjectKeys> {
+  const ingestKey = makeApiKey();
+  const dashboardKey = makeApiKey();
 
   const { rows } = await pool.query<{ id: string }>(
-    `INSERT INTO projects (name, api_key, api_key_prefix, owner_email)
-     VALUES ($1, $2, $3, $4)
+    `INSERT INTO projects (name, api_key_hash, api_key_prefix, dashboard_key_hash, dashboard_key_prefix, owner_email)
+     VALUES ($1, $2, $3, $4, $5, $6)
      RETURNING id`,
-    [name, apiKey, apiKeyPrefix, ownerEmail],
+    [
+      name,
+      hashApiKey(ingestKey),
+      ingestKey.slice(0, 8),
+      hashApiKey(dashboardKey),
+      dashboardKey.slice(0, 8),
+      ownerEmail,
+    ],
   );
 
   const id = rows[0]?.id;
   if (!id) throw new Error('createProject: insert returned no id');
-  return { id, apiKey };
+  return { id, ingestKey, dashboardKey };
 }
 
-export async function findProjectByApiKey(pool: Pool, apiKey: string): Promise<Project | null> {
+export async function rotateProjectKeys(pool: Pool, projectId: string): Promise<NewProjectKeys> {
+  const ingestKey = makeApiKey();
+  const dashboardKey = makeApiKey();
+
+  await pool.query(
+    `UPDATE projects
+     SET api_key_hash = $1, api_key_prefix = $2, dashboard_key_hash = $3, dashboard_key_prefix = $4
+     WHERE id = $5`,
+    [
+      hashApiKey(ingestKey),
+      ingestKey.slice(0, 8),
+      hashApiKey(dashboardKey),
+      dashboardKey.slice(0, 8),
+      projectId,
+    ],
+  );
+
+  return { id: projectId, ingestKey, dashboardKey };
+}
+
+export async function findProjectByApiKey(
+  pool: Pool,
+  apiKey: string,
+  scope: ApiKeyScope,
+): Promise<Project | null> {
   const prefix = apiKey.slice(0, 8);
-  const { rows } = await pool.query<{ id: string; api_key: string; is_active: boolean }>(
-    'SELECT id, api_key, is_active FROM projects WHERE api_key_prefix = $1',
+  const hashColumn = scope === 'ingest' ? 'api_key_hash' : 'dashboard_key_hash';
+  const prefixColumn = scope === 'ingest' ? 'api_key_prefix' : 'dashboard_key_prefix';
+
+  const { rows } = await pool.query<{ id: string; key_hash: string | null; is_active: boolean }>(
+    `SELECT id, ${hashColumn} AS key_hash, is_active FROM projects WHERE ${prefixColumn} = $1`,
     [prefix],
   );
-  const match = rows.find((candidate) => candidate.api_key === apiKey);
+
+  const presentedHash = Buffer.from(hashApiKey(apiKey));
+  const match = rows.find((candidate) => {
+    if (!candidate.key_hash) return false;
+    const storedHash = Buffer.from(candidate.key_hash);
+    return storedHash.length === presentedHash.length && timingSafeEqual(storedHash, presentedHash);
+  });
   return match ? { id: match.id, isActive: match.is_active } : null;
 }
 
