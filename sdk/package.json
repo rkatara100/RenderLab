@@ -1,10 +1,17 @@
 {
   "name": "@renderlab/sdk",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
+  "description": "React instrumentation SDK for RenderLab — detects and explains wasted re-renders",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rkatara100/RenderLab.git",
+    "directory": "sdk"
+  },
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "files": ["dist"],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

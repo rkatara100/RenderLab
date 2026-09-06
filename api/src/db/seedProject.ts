@@ -1,9 +1,5 @@
-import { randomBytes } from 'node:crypto';
 import { getPool, closePool } from './pool.js';
-
-function makeApiKey(): string {
-  return `rl_${randomBytes(24).toString('hex')}`;
-}
+import { createProject } from './repository.js';
 
 function parseArgs(argv: string[]): { name: string; email: string } {
   const args = new Map<string, string>();
@@ -24,19 +20,11 @@ function parseArgs(argv: string[]): { name: string; email: string } {
 
 async function main(): Promise<void> {
   const { name, email } = parseArgs(process.argv.slice(2));
-  const apiKey = makeApiKey();
-  const apiKeyPrefix = apiKey.slice(0, 8);
-
   const pool = getPool();
-  const { rows } = await pool.query<{ id: string }>(
-    `INSERT INTO projects (name, api_key, api_key_prefix, owner_email)
-     VALUES ($1, $2, $3, $4)
-     RETURNING id`,
-    [name, apiKey, apiKeyPrefix, email],
-  );
+  const project = await createProject(pool, name, email);
 
-  console.log(`Created project ${rows[0]?.id ?? '(unknown id)'} ("${name}")`);
-  console.log(`API key: ${apiKey}`);
+  console.log(`Created project ${project.id} ("${name}")`);
+  console.log(`API key: ${project.apiKey}`);
 
   await closePool();
 }

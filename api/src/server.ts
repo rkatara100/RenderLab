@@ -4,6 +4,7 @@ import type { Pool } from 'pg';
 import { getPool } from './db/pool.js';
 import { getRedis } from './redis/client.js';
 import { registerIngestRoutes } from './routes/ingest.js';
+import { registerProjectRoutes } from './routes/projects.js';
 import { registerReadRoutes } from './routes/sessions.js';
 import type { RedisLike } from './redis/hotPath.js';
 
@@ -34,6 +35,7 @@ export function buildServer(deps: ServerDeps = {}): FastifyInstance {
   });
 
   registerIngestRoutes(app, { pool, redis });
+  registerProjectRoutes(app, { pool });
   registerReadRoutes(app, { pool });
 
   return app;

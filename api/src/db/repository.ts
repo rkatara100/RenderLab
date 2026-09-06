@@ -1,8 +1,34 @@
+import { randomBytes } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 
 export interface Project {
   id: string;
   isActive: boolean;
+}
+
+export interface NewProject {
+  id: string;
+  apiKey: string;
+}
+
+export function makeApiKey(): string {
+  return `rl_${randomBytes(24).toString('hex')}`;
+}
+
+export async function createProject(pool: Pool, name: string, ownerEmail: string): Promise<NewProject> {
+  const apiKey = makeApiKey();
+  const apiKeyPrefix = apiKey.slice(0, 8);
+
+  const { rows } = await pool.query<{ id: string }>(
+    `INSERT INTO projects (name, api_key, api_key_prefix, owner_email)
+     VALUES ($1, $2, $3, $4)
+     RETURNING id`,
+    [name, apiKey, apiKeyPrefix, ownerEmail],
+  );
+
+  const id = rows[0]?.id;
+  if (!id) throw new Error('createProject: insert returned no id');
+  return { id, apiKey };
 }
 
 export async function findProjectByApiKey(pool: Pool, apiKey: string): Promise<Project | null> {
