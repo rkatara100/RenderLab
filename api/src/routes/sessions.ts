@@ -128,7 +128,7 @@ export function registerReadRoutes(app: FastifyInstance, deps: ReadRouteDeps): v
   const { pool, redis } = deps;
 
   app.get('/api/sessions', async (request, reply) => {
-    const project = await authenticateRequest(pool, request);
+    const project = await authenticateRequest(pool, request, 'dashboard');
     if (!project) return reply.code(401).send({ error: 'invalid or missing API key' });
 
     const rateLimit = await checkReadRateLimit(redis, project.id);
@@ -150,7 +150,7 @@ export function registerReadRoutes(app: FastifyInstance, deps: ReadRouteDeps): v
   app.get<{ Params: { sessionId: string } }>(
     '/api/sessions/:sessionId/components',
     async (request, reply) => {
-      const project = await authenticateRequest(pool, request);
+      const project = await authenticateRequest(pool, request, 'dashboard');
       if (!project) return reply.code(401).send({ error: 'invalid or missing API key' });
       if (!isValidUuid(request.params.sessionId)) {
         return reply.code(422).send({ error: 'sessionId must be a valid UUID' });
@@ -176,7 +176,7 @@ export function registerReadRoutes(app: FastifyInstance, deps: ReadRouteDeps): v
   app.get<{ Params: { sessionId: string }; Querystring: EventsQuery }>(
     '/api/sessions/:sessionId/events',
     async (request, reply) => {
-      const project = await authenticateRequest(pool, request);
+      const project = await authenticateRequest(pool, request, 'dashboard');
       if (!project) return reply.code(401).send({ error: 'invalid or missing API key' });
       if (!isValidUuid(request.params.sessionId)) {
         return reply.code(422).send({ error: 'sessionId must be a valid UUID' });
@@ -240,7 +240,7 @@ export function registerReadRoutes(app: FastifyInstance, deps: ReadRouteDeps): v
   app.get<{ Params: { sessionId: string } }>(
     '/api/sessions/:sessionId/replay',
     async (request, reply) => {
-      const project = await authenticateRequest(pool, request);
+      const project = await authenticateRequest(pool, request, 'dashboard');
       if (!project) return reply.code(401).send({ error: 'invalid or missing API key' });
       if (!isValidUuid(request.params.sessionId)) {
         return reply.code(422).send({ error: 'sessionId must be a valid UUID' });
@@ -287,7 +287,7 @@ export function registerReadRoutes(app: FastifyInstance, deps: ReadRouteDeps): v
   app.get<{ Params: { sessionId: string; eventId: string }; Querystring: EventDetailQuery }>(
     '/api/sessions/:sessionId/events/:eventId',
     async (request, reply) => {
-      const project = await authenticateRequest(pool, request);
+      const project = await authenticateRequest(pool, request, 'dashboard');
       if (!project) return reply.code(401).send({ error: 'invalid or missing API key' });
       if (!isValidUuid(request.params.sessionId)) {
         return reply.code(422).send({ error: 'sessionId must be a valid UUID' });
@@ -332,7 +332,7 @@ export function registerReadRoutes(app: FastifyInstance, deps: ReadRouteDeps): v
   app.get<{ Params: { sessionId: string }; Querystring: PerfEventsQuery }>(
     '/api/sessions/:sessionId/long-tasks',
     async (request, reply) => {
-      const project = await authenticateRequest(pool, request);
+      const project = await authenticateRequest(pool, request, 'dashboard');
       if (!project) return reply.code(401).send({ error: 'invalid or missing API key' });
       if (!isValidUuid(request.params.sessionId)) {
         return reply.code(422).send({ error: 'sessionId must be a valid UUID' });
@@ -378,7 +378,7 @@ export function registerReadRoutes(app: FastifyInstance, deps: ReadRouteDeps): v
   app.get<{ Params: { sessionId: string }; Querystring: PerfEventsQuery }>(
     '/api/sessions/:sessionId/network-requests',
     async (request, reply) => {
-      const project = await authenticateRequest(pool, request);
+      const project = await authenticateRequest(pool, request, 'dashboard');
       if (!project) return reply.code(401).send({ error: 'invalid or missing API key' });
       if (!isValidUuid(request.params.sessionId)) {
         return reply.code(422).send({ error: 'sessionId must be a valid UUID' });

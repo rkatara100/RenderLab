@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   findProjectByApiKey,
   getRenderEventDetail,
+  hashApiKey,
   insertLongTaskEvents,
   insertNetworkRequestEvents,
   insertRenderEvents,
@@ -19,23 +20,37 @@ import { createTestPool } from './doubles.js';
 import type { Pool } from 'pg';
 
 describe('findProjectByApiKey', () => {
-  it('looks up by key prefix, then compares the full key among candidates', async () => {
+  it('looks up by key prefix, then compares the full key (hashed) among candidates', async () => {
     const pool = createTestPool(() => ({
-      rows: [{ id: 'p1', api_key: 'abcd1234-real', is_active: true }],
+      rows: [{ id: 'p1', key_hash: hashApiKey('abcd1234-real'), is_active: true }],
     }));
 
-    const project = await findProjectByApiKey(pool as unknown as Pool, 'abcd1234-real');
+    const project = await findProjectByApiKey(pool as unknown as Pool, 'abcd1234-real', 'ingest');
 
+    expect(pool.calls[0]?.text).toContain('api_key_hash AS key_hash');
+    expect(pool.calls[0]?.text).toContain('api_key_prefix = $1');
     expect(pool.calls[0]?.params).toEqual(['abcd1234']);
     expect(project).toEqual({ id: 'p1', isActive: true });
   });
 
   it('returns null when no candidate matches the full key', async () => {
     const pool = createTestPool(() => ({
-      rows: [{ id: 'p1', api_key: 'other-key', is_active: true }],
+      rows: [{ id: 'p1', key_hash: hashApiKey('other-key'), is_active: true }],
     }));
-    const project = await findProjectByApiKey(pool as unknown as Pool, 'abcd1234-real');
+    const project = await findProjectByApiKey(pool as unknown as Pool, 'abcd1234-real', 'ingest');
     expect(project).toBeNull();
+  });
+
+  it('looks up dashboard-scoped keys against the dashboard columns', async () => {
+    const pool = createTestPool(() => ({
+      rows: [{ id: 'p1', key_hash: hashApiKey('abcd1234-real'), is_active: true }],
+    }));
+
+    const project = await findProjectByApiKey(pool as unknown as Pool, 'abcd1234-real', 'dashboard');
+
+    expect(pool.calls[0]?.text).toContain('dashboard_key_hash AS key_hash');
+    expect(pool.calls[0]?.text).toContain('dashboard_key_prefix = $1');
+    expect(project).toEqual({ id: 'p1', isActive: true });
   });
 });
 

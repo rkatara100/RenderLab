@@ -80,7 +80,7 @@ export function registerIngestRoutes(app: FastifyInstance, deps: IngestRouteDeps
   const { pool, redis } = deps;
 
   app.post<{ Body: IngestEventsBody }>('/api/ingest/events', async (request, reply) => {
-    const project = await authenticateRequest(pool, request);
+    const project = await authenticateRequest(pool, request, 'ingest');
     if (!project) {
       return reply.code(401).send({ error: 'invalid or missing API key' });
     }
@@ -195,7 +195,7 @@ export function registerIngestRoutes(app: FastifyInstance, deps: IngestRouteDeps
   });
 
   app.post<{ Body: SessionEndBody }>('/api/ingest/session-end', async (request, reply) => {
-    const project = await authenticateRequest(pool, request);
+    const project = await authenticateRequest(pool, request, 'ingest');
     if (!project) {
       return reply.code(401).send({ error: 'invalid or missing API key' });
     }

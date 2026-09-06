@@ -26,6 +26,7 @@ describe('runMigrations', () => {
       '002_render_event_diagnostics.sql',
       '003_perf_events.sql',
       '004_render_event_replay_fields.sql',
+      '005_split_ingest_dashboard_keys.sql',
     ]);
     const insertCalls = pool.calls.filter((c) => c.text.includes('INSERT INTO schema_migrations'));
     expect(insertCalls.map((c) => c.params[0])).toEqual([
@@ -33,6 +34,7 @@ describe('runMigrations', () => {
       '002_render_event_diagnostics.sql',
       '003_perf_events.sql',
       '004_render_event_replay_fields.sql',
+      '005_split_ingest_dashboard_keys.sql',
     ]);
 
     expect(pool.calls.some((c) => c.text.includes('CREATE TABLE IF NOT EXISTS projects'))).toBe(
@@ -47,6 +49,9 @@ describe('runMigrations', () => {
     expect(pool.calls.some((c) => c.text.includes('ADD COLUMN IF NOT EXISTS component_path'))).toBe(
       true,
     );
+    expect(pool.calls.some((c) => c.text.includes('RENAME COLUMN api_key TO api_key_hash'))).toBe(
+      true,
+    );
   });
 
   it('is idempotent: re-running against an already-migrated database applies nothing', async () => {
@@ -58,6 +63,7 @@ describe('runMigrations', () => {
             { name: '002_render_event_diagnostics.sql' },
             { name: '003_perf_events.sql' },
             { name: '004_render_event_replay_fields.sql' },
+            { name: '005_split_ingest_dashboard_keys.sql' },
           ],
         };
       }
@@ -84,6 +90,7 @@ describe('runMigrations', () => {
       '002_render_event_diagnostics.sql',
       '003_perf_events.sql',
       '004_render_event_replay_fields.sql',
+      '005_split_ingest_dashboard_keys.sql',
     ]);
     expect(pool.calls.some((c) => c.text.includes('CREATE TABLE IF NOT EXISTS projects'))).toBe(
       false,

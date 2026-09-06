@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { Pool } from 'pg';
-import { createProject } from '../db/repository.js';
+import { createProject, rotateProjectKeys } from '../db/repository.js';
+import { authenticateRequest } from '../auth/apiKey.js';
 import { checkRateLimit } from '../redis/rateLimit.js';
 import { redisKeys } from '../redis/keys.js';
 import type { RedisLike } from '../redis/hotPath.js';
@@ -52,6 +53,25 @@ export function registerProjectRoutes(app: FastifyInstance, deps: ProjectRouteDe
     }
 
     const project = await createProject(pool, name, email);
-    return reply.code(201).send({ id: project.id, apiKey: project.apiKey });
+    return reply.code(201).send({
+      id: project.id,
+      ingestKey: project.ingestKey,
+      dashboardKey: project.dashboardKey,
+    });
+  });
+
+  app.post<{ Params: { id: string } }>('/api/projects/:id/rotate', async (request, reply) => {
+    const project = await authenticateRequest(pool, request, 'dashboard');
+    if (!project) return reply.code(401).send({ error: 'invalid or missing API key' });
+    if (project.id !== request.params.id) {
+      return reply.code(403).send({ error: 'that API key does not belong to this project' });
+    }
+
+    const keys = await rotateProjectKeys(pool, project.id);
+    return reply.code(200).send({
+      id: keys.id,
+      ingestKey: keys.ingestKey,
+      dashboardKey: keys.dashboardKey,
+    });
   });
 }

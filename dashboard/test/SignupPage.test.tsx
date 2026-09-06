@@ -16,21 +16,23 @@ describe('SignupPage', () => {
     useSettingsStore.setState({ apiBaseUrl: 'http://api.test', apiKey: '' });
   });
 
-  it('shows the created API key and saves it to Settings on success', async () => {
+  it('shows both created keys and saves the dashboard key to Settings on success', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
         ok: true,
         status: 201,
-        json: () => Promise.resolve({ id: 'proj-1', apiKey: 'rl_abc123' }),
+        json: () =>
+          Promise.resolve({ id: 'proj-1', ingestKey: 'rl_ingest123', dashboardKey: 'rl_dash456' }),
       }),
     );
 
     render(<SignupPage />);
     fillAndSubmit();
 
-    await waitFor(() => expect(screen.getByText('rl_abc123')).toBeInTheDocument());
-    expect(useSettingsStore.getState().apiKey).toBe('rl_abc123');
+    await waitFor(() => expect(screen.getByText('rl_ingest123')).toBeInTheDocument());
+    expect(screen.getByText('rl_dash456')).toBeInTheDocument();
+    expect(useSettingsStore.getState().apiKey).toBe('rl_dash456');
   });
 
   it('shows an error message when the API rejects the request', async () => {
