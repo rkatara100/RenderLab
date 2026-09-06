@@ -127,6 +127,29 @@ describe('POST /api/ingest/events', () => {
     expect(insertCall?.params).toEqual(expect.arrayContaining([1, 5, true]));
   });
 
+  it('persists phase, componentPath, and commitTime for every render event', async () => {
+    const pool = createPool();
+    const app = buildServer({ pool: pool as unknown as Pool, redis: createTestRedis() });
+
+    await app.inject({
+      method: 'POST',
+      url: '/api/ingest/events',
+      headers: { authorization: `Bearer ${API_KEY}` },
+      payload: makeBatchBody([
+        makeRenderEvent({
+          phase: 'update',
+          componentPath: ['App#0', 'List#0', 'SearchBox#3'],
+          commitTime: 42.5,
+        }),
+      ]),
+    });
+
+    const insertCall = pool.calls.find((c) => c.text.includes('INSERT INTO render_events'));
+    expect(insertCall?.params).toEqual(
+      expect.arrayContaining([2, ['App#0', 'List#0', 'SearchBox#3'], 42.5]),
+    );
+  });
+
   it('persists reasonDetail and propsDiff for a props-changed render, not just avoidable ones', async () => {
     const pool = createPool();
     const app = buildServer({ pool: pool as unknown as Pool, redis: createTestRedis() });

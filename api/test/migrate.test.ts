@@ -25,12 +25,14 @@ describe('runMigrations', () => {
       '001_init.sql',
       '002_render_event_diagnostics.sql',
       '003_perf_events.sql',
+      '004_render_event_replay_fields.sql',
     ]);
     const insertCalls = pool.calls.filter((c) => c.text.includes('INSERT INTO schema_migrations'));
     expect(insertCalls.map((c) => c.params[0])).toEqual([
       '001_init.sql',
       '002_render_event_diagnostics.sql',
       '003_perf_events.sql',
+      '004_render_event_replay_fields.sql',
     ]);
 
     expect(pool.calls.some((c) => c.text.includes('CREATE TABLE IF NOT EXISTS projects'))).toBe(
@@ -40,6 +42,9 @@ describe('runMigrations', () => {
       true,
     );
     expect(pool.calls.some((c) => c.text.includes('CREATE TABLE IF NOT EXISTS long_task_events'))).toBe(
+      true,
+    );
+    expect(pool.calls.some((c) => c.text.includes('ADD COLUMN IF NOT EXISTS component_path'))).toBe(
       true,
     );
   });
@@ -52,6 +57,7 @@ describe('runMigrations', () => {
             { name: '001_init.sql' },
             { name: '002_render_event_diagnostics.sql' },
             { name: '003_perf_events.sql' },
+            { name: '004_render_event_replay_fields.sql' },
           ],
         };
       }
@@ -74,7 +80,11 @@ describe('runMigrations', () => {
     });
 
     const applied = await runMigrations(pool as unknown as Pool);
-    expect(applied).toEqual(['002_render_event_diagnostics.sql', '003_perf_events.sql']);
+    expect(applied).toEqual([
+      '002_render_event_diagnostics.sql',
+      '003_perf_events.sql',
+      '004_render_event_replay_fields.sql',
+    ]);
     expect(pool.calls.some((c) => c.text.includes('CREATE TABLE IF NOT EXISTS projects'))).toBe(
       false,
     );

@@ -1,4 +1,5 @@
 import type { ContextDiffEntry, PropDiffEntry, RenderReason } from './renderReason.js';
+import type { RenderPhase } from './events.js';
 
 export interface SessionSummary {
   id: string;
@@ -75,4 +76,22 @@ export interface NetworkRequestSummary {
 export interface NetworkRequestPage {
   requests: NetworkRequestSummary[];
   nextCursor: EventPageCursor | null;
+}
+
+export interface ReplayEvent {
+  id: string;
+  ts: string;
+  durationMs: number;
+  renderReason: RenderReason;
+  isAvoidable: boolean;
+  componentId: number;
+  componentName: string;
+  phase: RenderPhase;
+  componentPath: string[];
+  commitTime: number;
+}
+
+export interface ReplayEventsResponse {
+  events: ReplayEvent[];
+  truncated: boolean;
 }

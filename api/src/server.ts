@@ -36,7 +36,7 @@ export function buildServer(deps: ServerDeps = {}): FastifyInstance {
 
   registerIngestRoutes(app, { pool, redis });
   registerProjectRoutes(app, { pool, redis });
-  registerReadRoutes(app, { pool });
+  registerReadRoutes(app, { pool, redis });
 
   return app;
 }
