@@ -50,12 +50,35 @@ function withUpdatedPath(
   return nextNodes;
 }
 
+function withRemovedPath(nodes: ReplayTreeNode[], path: string[], depth: number): ReplayTreeNode[] {
+  const id = path[depth];
+  if (id === undefined) return nodes;
+  const existingIndex = nodes.findIndex((n) => n.id === id);
+  if (existingIndex === -1) return nodes;
+
+  const isLeaf = depth === path.length - 1;
+  if (isLeaf) {
+    return nodes.filter((n) => n.id !== id);
+  }
+
+  const existing = nodes[existingIndex];
+  if (!existing) return nodes;
+  const updatedChildren = withRemovedPath(existing.children, path, depth + 1);
+  const nextNodes = [...nodes];
+  nextNodes[existingIndex] = { ...existing, children: updatedChildren };
+  return nextNodes;
+}
+
 export function buildTreeSnapshots(frames: ReplayFrame[]): ReplayTree[] {
   const snapshots: ReplayTree[] = [];
   let tree: ReplayTree = [];
 
   for (const frame of frames) {
     for (const event of frame.events) {
+      if (event.phase === 'unmount') {
+        tree = withRemovedPath(tree, event.componentPath, 0);
+        continue;
+      }
       tree = withUpdatedPath(tree, event.componentPath, 0, event.componentName, {
         renderReason: event.renderReason,
         durationMs: event.durationMs,

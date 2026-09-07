@@ -88,4 +88,99 @@ describe('buildTreeSnapshots', () => {
 
     expect(snapshots[0]?.[0]).toMatchObject({ id: 'App#0', name: 'App#0' });
   });
+
+  it('removes a leaf node from the tree on its unmount event', () => {
+    const frames = buildFrames([
+      makeEvent({
+        id: '1',
+        componentName: 'SearchBox',
+        componentPath: ['App#0', 'SearchBox#0'],
+        commitTime: 10,
+        phase: 'mount',
+      }),
+      makeEvent({
+        id: '2',
+        componentName: 'SearchBox',
+        componentPath: ['App#0', 'SearchBox#0'],
+        commitTime: 20,
+        phase: 'unmount',
+      }),
+    ]);
+    const snapshots = buildTreeSnapshots(frames);
+
+    expect(snapshots[0]?.[0]?.children).toHaveLength(1);
+    expect(snapshots[1]?.[0]?.children).toHaveLength(0);
+  });
+
+  it('removing a node also removes its entire subtree', () => {
+    const frames = buildFrames([
+      makeEvent({ id: '1', componentName: 'App', componentPath: ['App#0'], commitTime: 10 }),
+      makeEvent({
+        id: '2',
+        componentName: 'List',
+        componentPath: ['App#0', 'List#0'],
+        commitTime: 20,
+      }),
+      makeEvent({
+        id: '3',
+        componentName: 'Row',
+        componentPath: ['App#0', 'List#0', 'Row#0'],
+        commitTime: 30,
+      }),
+      makeEvent({
+        id: '4',
+        componentName: 'List',
+        componentPath: ['App#0', 'List#0'],
+        commitTime: 40,
+        phase: 'unmount',
+      }),
+    ]);
+    const snapshots = buildTreeSnapshots(frames);
+
+    const rootAfterRemoval = snapshots[3]?.[0];
+    expect(rootAfterRemoval?.children.find((c) => c.id === 'List#0')).toBeUndefined();
+  });
+
+  it('removing a sibling leaves the rest of the tree structurally shared', () => {
+    const frames = buildFrames([
+      makeEvent({ id: '1', componentName: 'App', componentPath: ['App#0'], commitTime: 10 }),
+      makeEvent({
+        id: '2',
+        componentName: 'List',
+        componentPath: ['App#0', 'List#0'],
+        commitTime: 20,
+      }),
+      makeEvent({
+        id: '3',
+        componentName: 'SearchBox',
+        componentPath: ['App#0', 'SearchBox#0'],
+        commitTime: 30,
+      }),
+      makeEvent({
+        id: '4',
+        componentName: 'SearchBox',
+        componentPath: ['App#0', 'SearchBox#0'],
+        commitTime: 40,
+        phase: 'unmount',
+      }),
+    ]);
+    const snapshots = buildTreeSnapshots(frames);
+
+    const finalChildren = snapshots[3]?.[0]?.children.map((c) => c.id);
+    expect(finalChildren).toEqual(['List#0']);
+  });
+
+  it('does nothing when an unmount arrives for a path that was never in the tree', () => {
+    const frames = buildFrames([
+      makeEvent({
+        id: '1',
+        componentName: 'Ghost',
+        componentPath: ['App#0', 'Ghost#0'],
+        commitTime: 10,
+        phase: 'unmount',
+      }),
+    ]);
+    expect(() => buildTreeSnapshots(frames)).not.toThrow();
+    expect(buildTreeSnapshots(frames)[0]).toEqual([]);
+  });
 });
