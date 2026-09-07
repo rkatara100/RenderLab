@@ -12,7 +12,8 @@
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "dev": "tsx watch src/index.ts",
     "db:migrate": "tsx src/db/runMigrate.ts",
-    "db:seed": "tsx src/db/seedProject.ts"
+    "db:seed": "tsx src/db/seedProject.ts",
+    "db:rescue-legacy-keys": "tsx src/db/rescueLegacyKeys.ts"
   },
   "dependencies": {
     "@fastify/cors": "^11.3.0",
