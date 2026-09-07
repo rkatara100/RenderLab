@@ -35,13 +35,9 @@ import {
   shouldPersistPropsDiff,
 } from './renderReasonCodes.js';
 import { phaseToCode } from './eventPhaseCodes.js';
+import { getEnv, type AppEnv } from '../config/env.js';
 
 const MAX_EVENTS_PER_BATCH = 500;
-
-const INGEST_RATE_LIMIT = Number(process.env.INGEST_RATE_LIMIT_MAX ?? 600);
-const INGEST_RATE_LIMIT_WINDOW_SECONDS = Number(
-  process.env.INGEST_RATE_LIMIT_WINDOW_SECONDS ?? 60,
-);
 
 interface IngestEventsBody {
   batch_id: string;
@@ -62,6 +58,7 @@ interface SessionEndBody {
 export interface IngestRouteDeps {
   pool: Pool;
   redis: RedisLike;
+  env?: AppEnv;
 }
 
 function isRenderEvent(event: TelemetryEvent): event is RenderEvent {
@@ -76,8 +73,59 @@ function isNetworkRequestEvent(event: TelemetryEvent): event is NetworkRequestEv
   return event.type === 'network-request';
 }
 
+function toIsoTimestamp(value: unknown): string | null {
+  if (typeof value !== 'string' && typeof value !== 'number') return null;
+  const parsed = new Date(value);
+  const time = parsed.getTime();
+  if (!Number.isFinite(time)) return null;
+  return parsed.toISOString();
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0;
+}
+
+function validateBatchEvents(events: TelemetryEvent[]): string | null {
+  for (let index = 0; index < events.length; index += 1) {
+    const event = events[index];
+    if (typeof event !== 'object' || event === null) {
+      return `events[${index}] is not an object`;
+    }
+    if (toIsoTimestamp(event.timestamp) === null) {
+      return `events[${index}].timestamp is not a valid date`;
+    }
+    if (isRenderEvent(event)) {
+      if (!isNonEmptyString(event.componentName)) {
+        return `events[${index}].componentName is required`;
+      }
+      if (!isFiniteNumber(event.actualDuration)) {
+        return `events[${index}].actualDuration must be a finite number`;
+      }
+    } else if (isLongTaskEvent(event)) {
+      if (!isFiniteNumber(event.duration)) {
+        return `events[${index}].duration must be a finite number`;
+      }
+    } else if (isNetworkRequestEvent(event)) {
+      if (!isNonEmptyString(event.url)) {
+        return `events[${index}].url is required`;
+      }
+      if (!isFiniteNumber(event.duration)) {
+        return `events[${index}].duration must be a finite number`;
+      }
+    } else {
+      return `events[${index}].type is not a recognised event type`;
+    }
+  }
+  return null;
+}
+
 export function registerIngestRoutes(app: FastifyInstance, deps: IngestRouteDeps): void {
   const { pool, redis } = deps;
+  const env = deps.env ?? getEnv();
 
   app.post<{ Body: IngestEventsBody }>('/api/ingest/events', async (request, reply) => {
     const project = await authenticateRequest(pool, request, 'ingest');
@@ -88,9 +136,12 @@ export function registerIngestRoutes(app: FastifyInstance, deps: IngestRouteDeps
     const rateLimit = await checkRateLimit(
       redis,
       redisKeys.rateLimitIngest(project.id),
-      INGEST_RATE_LIMIT,
-      INGEST_RATE_LIMIT_WINDOW_SECONDS,
+      env.ingestRateLimitMax,
+      env.ingestRateLimitWindowSeconds,
     );
+    if (rateLimit.degraded) {
+      request.log.warn({ projectId: project.id }, 'rate limiter degraded, allowing request');
+    }
     if (!rateLimit.allowed) {
       return reply
         .code(429)
@@ -104,6 +155,13 @@ export function registerIngestRoutes(app: FastifyInstance, deps: IngestRouteDeps
     }
     if (body.events.length > MAX_EVENTS_PER_BATCH) {
       return reply.code(413).send({ error: `batch exceeds ${MAX_EVENTS_PER_BATCH} events` });
+    }
+    if (toIsoTimestamp(body.session.started_at) === null) {
+      return reply.code(422).send({ error: 'session.started_at is not a valid date' });
+    }
+    const invalidEvent = validateBatchEvents(body.events);
+    if (invalidEvent !== null) {
+      return reply.code(422).send({ error: invalidEvent });
     }
 
     if (await isDuplicateBatch(redis, project.id, body.batch_id)) {

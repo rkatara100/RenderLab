@@ -5,15 +5,14 @@ import { authenticateRequest } from '../auth/apiKey.js';
 import { checkRateLimit } from '../redis/rateLimit.js';
 import { redisKeys } from '../redis/keys.js';
 import type { RedisLike } from '../redis/hotPath.js';
+import { getEnv, type AppEnv } from '../config/env.js';
 
 const MAX_NAME_LENGTH = 200;
 const MAX_EMAIL_LENGTH = 320;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-const SIGNUP_RATE_LIMIT = Number(process.env.SIGNUP_RATE_LIMIT_MAX ?? 10);
-const SIGNUP_RATE_LIMIT_WINDOW_SECONDS = Number(
-  process.env.SIGNUP_RATE_LIMIT_WINDOW_SECONDS ?? 900,
-);
+const ROTATE_RATE_LIMIT_MAX = 5;
+const ROTATE_RATE_LIMIT_WINDOW_SECONDS = 3600;
 
 interface CreateProjectBody {
   name?: string;
@@ -23,18 +22,23 @@ interface CreateProjectBody {
 export interface ProjectRouteDeps {
   pool: Pool;
   redis: RedisLike;
+  env?: AppEnv;
 }
 
 export function registerProjectRoutes(app: FastifyInstance, deps: ProjectRouteDeps): void {
   const { pool, redis } = deps;
+  const env = deps.env ?? getEnv();
 
   app.post<{ Body: CreateProjectBody }>('/api/projects', async (request, reply) => {
     const rateLimit = await checkRateLimit(
       redis,
       redisKeys.rateLimitSignup(request.ip),
-      SIGNUP_RATE_LIMIT,
-      SIGNUP_RATE_LIMIT_WINDOW_SECONDS,
+      env.signupRateLimitMax,
+      env.signupRateLimitWindowSeconds,
     );
+    if (rateLimit.degraded) {
+      request.log.warn({ ip: request.ip }, 'rate limiter degraded, allowing signup');
+    }
     if (!rateLimit.allowed) {
       return reply
         .code(429)
@@ -67,7 +71,21 @@ export function registerProjectRoutes(app: FastifyInstance, deps: ProjectRouteDe
       return reply.code(403).send({ error: 'that API key does not belong to this project' });
     }
 
+    const rateLimit = await checkRateLimit(
+      redis,
+      redisKeys.rateLimitRotate(project.id),
+      ROTATE_RATE_LIMIT_MAX,
+      ROTATE_RATE_LIMIT_WINDOW_SECONDS,
+    );
+    if (!rateLimit.allowed) {
+      return reply
+        .code(429)
+        .header('Retry-After', rateLimit.retryAfterSeconds)
+        .send({ error: 'too many key rotations, try again later' });
+    }
+
     const keys = await rotateProjectKeys(pool, project.id);
+    request.log.info({ projectId: project.id }, 'project keys rotated');
     return reply.code(200).send({
       id: keys.id,
       ingestKey: keys.ingestKey,
