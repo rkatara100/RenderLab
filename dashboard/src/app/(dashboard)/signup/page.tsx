@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { useSettingsStore } from '../../stores/useSettingsStore';
+import { useSettingsStore } from '../../../stores/useSettingsStore';
 
 interface CreateProjectResponse {
   id: string;
@@ -11,10 +11,18 @@ interface CreateProjectResponse {
 }
 
 export default function SignupPage(): React.JSX.Element {
-  const { apiBaseUrl, setApiBaseUrl, setApiKey } = useSettingsStore();
+  const { apiBaseUrl, setApiBaseUrl, setApiKey, setProjectId } = useSettingsStore();
   const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [createdKeys, setCreatedKeys] = useState<CreateProjectResponse | null>(null);
+  const [copiedKey, setCopiedKey] = useState<'ingest' | 'dashboard' | null>(null);
+
+  const copyKey = (key: 'ingest' | 'dashboard', value: string): void => {
+    void navigator.clipboard.writeText(value).then(() => {
+      setCopiedKey(key);
+      setTimeout(() => setCopiedKey((current) => (current === key ? null : current)), 2000);
+    });
+  };
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>): Promise<void> => {
     e.preventDefault();
@@ -46,6 +54,7 @@ export default function SignupPage(): React.JSX.Element {
       const project = (await response.json()) as CreateProjectResponse;
       setApiBaseUrl(baseUrl);
       setApiKey(project.dashboardKey);
+      setProjectId(project.id);
       setCreatedKeys(project);
       setStatus('idle');
     } catch {
@@ -66,14 +75,20 @@ export default function SignupPage(): React.JSX.Element {
           data in, never read it back.
         </p>
         <p className="settings-form__status">
-          <code>{createdKeys.ingestKey}</code>
+          <code>{createdKeys.ingestKey}</code>{' '}
+          <button type="button" onClick={() => copyKey('ingest', createdKeys.ingestKey)}>
+            {copiedKey === 'ingest' ? 'Copied' : 'Copy'}
+          </button>
         </p>
         <p>
           <strong>Dashboard key</strong> — what this dashboard uses to read your data. Already saved
           to Settings in this browser; never put this one in your app&rsquo;s code.
         </p>
         <p className="settings-form__status">
-          <code>{createdKeys.dashboardKey}</code>
+          <code>{createdKeys.dashboardKey}</code>{' '}
+          <button type="button" onClick={() => copyKey('dashboard', createdKeys.dashboardKey)}>
+            {copiedKey === 'dashboard' ? 'Copied' : 'Copy'}
+          </button>
         </p>
         <p>
           Pass the ingest key to the SDK&rsquo;s <code>init({'{'} apiKey {'}'})</code>, or head to{' '}

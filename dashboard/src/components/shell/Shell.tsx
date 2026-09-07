@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import type { ReactNode } from 'react';
 import { useUIStore, type ThemePreference } from '../../stores/useUIStore';
 import { OfflineBanner } from '../shared/OfflineBanner';
+import { Toaster } from '../shared/Toaster';
 
 const NAV_ITEMS: Array<{ href: string; label: string }> = [
   { href: '/tree', label: 'Component Tree' },
@@ -12,6 +13,10 @@ const NAV_ITEMS: Array<{ href: string; label: string }> = [
   { href: '/why-did-it-render', label: 'Why Did It Render?' },
   { href: '/network', label: 'Network' },
   { href: '/replay', label: 'Replay' },
+];
+
+const SECONDARY_NAV_ITEMS: Array<{ href: string; label: string }> = [
+  { href: '/signup', label: 'New project' },
   { href: '/settings', label: 'Settings' },
 ];
 
@@ -63,6 +68,15 @@ export function Shell({ children }: { children: ReactNode }): React.JSX.Element 
               </li>
             ))}
           </ul>
+          <ul className="shell__nav-secondary">
+            {SECONDARY_NAV_ITEMS.map((item) => (
+              <li key={item.href}>
+                <Link href={item.href} aria-current={pathname === item.href ? 'page' : undefined}>
+                  {item.label}
+                </Link>
+              </li>
+            ))}
+          </ul>
         </nav>
         <ThemeToggle />
       </aside>
@@ -72,6 +86,7 @@ export function Shell({ children }: { children: ReactNode }): React.JSX.Element 
           {children}
         </main>
       </div>
+      <Toaster />
     </div>
   );
 }
