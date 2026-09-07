@@ -1,3 +1,5 @@
+'use client';
+
 import { useContext, useRef, type Context } from 'react';
 import { getActiveRegistry } from './registry.js';
 

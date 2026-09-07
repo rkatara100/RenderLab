@@ -1,3 +1,5 @@
+'use client';
+
 import { Profiler, type ComponentType, type JSX } from 'react';
 import { ComponentPathContext } from '../provider/context.js';
 import { useRenderCapture } from './useRenderCapture.js';

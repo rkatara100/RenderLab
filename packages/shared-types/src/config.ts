@@ -33,6 +33,8 @@ export interface RenderLabSDKError {
 
 export interface RenderLabConfig {
   apiKey: string;
+  appId?: string;
+  appVersion?: string;
   environment?: string;
   endpoint?: string;
   sampleRate?: number;

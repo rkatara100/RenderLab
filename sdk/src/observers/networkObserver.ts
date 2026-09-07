@@ -1,6 +1,7 @@
 import type { NetworkRequestEvent } from '@renderlab/shared-types';
 import type { RenderLabRuntime } from '../capture/runtime.js';
 import { toWallClockMs } from './clock.js';
+import { createId } from '../capture/ids.js';
 
 const CAPTURED_INITIATOR_TYPES = new Set(['fetch', 'xmlhttprequest']);
 
@@ -25,7 +26,7 @@ export function startNetworkObserver(runtime: RenderLabRuntime): () => void {
 
         const event: NetworkRequestEvent = {
           type: 'network-request',
-          eventId: crypto.randomUUID(),
+          eventId: createId(),
           sessionId: runtime.sessionId,
           appId: runtime.appId,
           timestamp: toWallClockMs(entry.startTime),
@@ -36,7 +37,7 @@ export function startNetworkObserver(runtime: RenderLabRuntime): () => void {
           initiatorType: entry.initiatorType,
 
           ...(entry.responseStatus ? { status: entry.responseStatus } : {}),
-          ...(entry.transferSize ? { transferSize: entry.transferSize } : {}),
+          ...(entry.transferSize !== undefined ? { transferSize: entry.transferSize } : {}),
         };
         runtime.queue.enqueue(event);
       }

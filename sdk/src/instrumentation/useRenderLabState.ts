@@ -1,3 +1,5 @@
+'use client';
+
 import { useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { getActiveRegistry } from './registry.js';
 

@@ -21,6 +21,8 @@ class TestPerformanceObserver {
 function makeConfig(overrides: Partial<ResolvedConfig> = {}): ResolvedConfig {
   return {
     apiKey: 'key',
+    appId: 'test-app',
+    appVersion: undefined,
     environment: 'production',
     endpoint: 'https://ingest.renderlab.dev',
     sampleRate: 1,
