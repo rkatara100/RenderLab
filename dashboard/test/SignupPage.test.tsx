@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import SignupPage from '../src/app/signup/page';
+import SignupPage from '../src/app/(dashboard)/signup/page';
 import { useSettingsStore } from '../src/stores/useSettingsStore';
 
 function fillAndSubmit(): void {
