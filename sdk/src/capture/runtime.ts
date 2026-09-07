@@ -4,6 +4,7 @@ import { startObservers } from '../observers/index.js';
 import { BatchQueue, type EventSink } from './queue.js';
 import { serializeEvent } from './serialize.js';
 import { sendBatch } from './transport.js';
+import { createId } from './ids.js';
 
 export interface RenderLabRuntime {
   config: ResolvedConfig;
@@ -19,11 +20,11 @@ export interface RenderLabRuntime {
 export function createRuntime(config: RenderLabConfig): RenderLabRuntime {
   const resolved = resolveConfig(config);
   const sampled = Math.random() < resolved.sampleRate;
-  const sessionId = crypto.randomUUID();
+  const sessionId = createId();
   const sessionStartedAt = Date.now();
   let sequence = 0;
 
-  const queue = new BatchQueue({
+  const batchQueue = new BatchQueue({
     maxSize: resolved.batch.maxSize,
     flushIntervalMs: resolved.batch.flushIntervalMs,
     maxQueueBytes: resolved.batch.maxQueueBytes,
@@ -34,7 +35,12 @@ export function createRuntime(config: RenderLabConfig): RenderLabRuntime {
         void sendBatch(
           serialized,
           { sessionId, startedAt: sessionStartedAt },
-          { endpoint: resolved.endpoint, apiKey: resolved.apiKey, mode: resolved.transport },
+          {
+            endpoint: resolved.endpoint,
+            apiKey: resolved.apiKey,
+            mode: resolved.transport,
+            appVersion: resolved.appVersion,
+          },
         ).catch((cause: unknown) => {
           resolved.onError({ message: 'RenderLab: failed to send batch', cause });
         });
@@ -46,14 +52,19 @@ export function createRuntime(config: RenderLabConfig): RenderLabRuntime {
 
   function flushForUnload(): void {
     if (!sampled) return;
-    const events = queue.drain();
+    const events = batchQueue.drain();
     if (events.length === 0) return;
     try {
       const serialized = events.map((event) => serializeEvent(event, resolved));
       void sendBatch(
         serialized,
         { sessionId, startedAt: sessionStartedAt },
-        { endpoint: resolved.endpoint, apiKey: resolved.apiKey, mode: 'beacon' },
+        {
+          endpoint: resolved.endpoint,
+          apiKey: resolved.apiKey,
+          mode: 'beacon',
+          appVersion: resolved.appVersion,
+        },
       ).catch((cause: unknown) => {
         resolved.onError({ message: 'RenderLab: failed to flush batch on unload', cause });
       });
@@ -70,19 +81,22 @@ export function createRuntime(config: RenderLabConfig): RenderLabRuntime {
   if (hasDocument) document.addEventListener('visibilitychange', visibilityHandler);
   if (hasWindow) window.addEventListener('pagehide', flushForUnload);
 
+  const noopSink: EventSink = { enqueue: () => {} };
+
   const runtime: RenderLabRuntime = {
     config: resolved,
-    queue,
+    queue: sampled ? batchQueue : noopSink,
     sessionId,
     sessionStartedAt,
 
-    appId: resolved.apiKey.slice(0, 8),
+    appId: resolved.appId,
     nextSequence: () => (sequence += 1),
     stopObservers: () => {},
   };
   const stopObserverInstrumentation = startObservers(runtime);
   runtime.stopObservers = () => {
     stopObserverInstrumentation();
+    batchQueue.destroy();
     if (hasDocument) document.removeEventListener('visibilitychange', visibilityHandler);
     if (hasWindow) window.removeEventListener('pagehide', flushForUnload);
   };

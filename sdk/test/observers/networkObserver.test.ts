@@ -25,6 +25,8 @@ class TestPerformanceObserver {
 function makeConfig(overrides: Partial<ResolvedConfig> = {}): ResolvedConfig {
   return {
     apiKey: 'key',
+    appId: 'test-app',
+    appVersion: undefined,
     environment: 'production',
     endpoint: 'https://ingest.renderlab.dev',
     sampleRate: 1,
@@ -135,7 +137,7 @@ describe('startNetworkObserver', () => {
     expect(runtime.queue.enqueue).not.toHaveBeenCalled();
   });
 
-  it('omits status/transferSize when reported as 0 (unavailable)', () => {
+  it('omits status when reported as 0 (unavailable per the Resource Timing spec)', () => {
     const runtime = makeRuntime();
     startNetworkObserver(runtime);
     const observer = TestPerformanceObserver.instances[0];
@@ -154,7 +156,26 @@ describe('startNetworkObserver', () => {
 
     const event = vi.mocked(runtime.queue.enqueue).mock.calls[0]?.[0] as NetworkRequestEvent;
     expect(event.status).toBeUndefined();
-    expect(event.transferSize).toBeUndefined();
+  });
+
+  it('keeps a transferSize of 0 for a cache hit rather than dropping it', () => {
+    const runtime = makeRuntime();
+    startNetworkObserver(runtime);
+    const observer = TestPerformanceObserver.instances[0];
+    if (!observer) throw new Error('observer not created');
+
+    observer.emit([
+      {
+        name: 'https://api.example.com/data',
+        initiatorType: 'xmlhttprequest',
+        startTime: 0,
+        duration: 5,
+        transferSize: 0,
+      },
+    ]);
+
+    const event = vi.mocked(runtime.queue.enqueue).mock.calls[0]?.[0] as NetworkRequestEvent;
+    expect(event.transferSize).toBe(0);
   });
 
   it('disconnects the underlying observer when disposed', () => {

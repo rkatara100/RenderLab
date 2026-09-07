@@ -1,3 +1,5 @@
+'use client';
+
 import { useContext, useMemo, useRef } from 'react';
 import type { ProfilerOnRenderCallback } from 'react';
 import type {
@@ -11,6 +13,7 @@ import { ComponentPathContext, RenderLabRuntimeContext } from '../provider/conte
 import { diffProps } from './propsDiff.js';
 import { computeRenderReason } from './renderReason.js';
 import { activateRegistry, type CaptureRegistry } from './registry.js';
+import { createId } from '../capture/ids.js';
 
 function isIgnored(name: string, patterns: Array<string | RegExp>): boolean {
   return patterns.some((p) => (typeof p === 'string' ? p === name : p.test(name)));
@@ -50,44 +53,51 @@ function finalizeCommit(commitKey: number): void {
   const renderedIds = new Set(records.map((r) => r.componentId));
 
   for (const record of records) {
-    const ancestorIds = record.componentPath.slice(0, -1);
-    const parentRenderedThisCommit = ancestorIds.some((id) => renderedIds.has(id));
+    try {
+      const ancestorIds = record.componentPath.slice(0, -1);
+      const parentRenderedThisCommit = ancestorIds.some((id) => renderedIds.has(id));
 
-    const { reason, detail } = computeRenderReason({
-      phase: record.phase,
-      propsDiff: record.propsDiff,
-      contextDiff: record.contextDiff,
-      stateChanged: record.stateChanged,
-      isMemoized: record.isMemoized,
-      parentRenderedThisCommit,
-    });
+      const { reason, detail } = computeRenderReason({
+        phase: record.phase,
+        propsDiff: record.propsDiff,
+        contextDiff: record.contextDiff,
+        stateChanged: record.stateChanged,
+        isMemoized: record.isMemoized,
+        parentRenderedThisCommit,
+      });
 
-    record.renderCountRef.current += 1;
+      record.renderCountRef.current += 1;
 
-    const event: RenderEvent = {
-      type: 'render',
-      eventId: crypto.randomUUID(),
-      sessionId: record.runtime.sessionId,
-      appId: record.runtime.appId,
-      timestamp: Date.now(),
-      sequence: record.runtime.nextSequence(),
-      componentId: record.componentId,
-      componentName: record.componentName,
-      componentPath: record.componentPath,
-      phase: record.phase,
-      renderReason: reason,
-      reasonDetail: detail,
-      propsDiff: record.propsDiff,
-      contextDiff: record.contextDiff,
-      actualDuration: record.timing.actualDuration,
-      baseDuration: record.timing.baseDuration,
-      startTime: record.timing.startTime,
-      commitTime: record.timing.commitTime,
-      isMemoized: record.isMemoized,
-      renderCount: record.renderCountRef.current,
-    };
+      const event: RenderEvent = {
+        type: 'render',
+        eventId: createId(),
+        sessionId: record.runtime.sessionId,
+        appId: record.runtime.appId,
+        timestamp: Date.now(),
+        sequence: record.runtime.nextSequence(),
+        componentId: record.componentId,
+        componentName: record.componentName,
+        componentPath: record.componentPath,
+        phase: record.phase,
+        renderReason: reason,
+        reasonDetail: detail,
+        propsDiff: record.propsDiff,
+        contextDiff: record.contextDiff,
+        actualDuration: record.timing.actualDuration,
+        baseDuration: record.timing.baseDuration,
+        startTime: record.timing.startTime,
+        commitTime: record.timing.commitTime,
+        isMemoized: record.isMemoized,
+        renderCount: record.renderCountRef.current,
+      };
 
-    record.runtime.queue.enqueue(event);
+      record.runtime.queue.enqueue(event);
+    } catch (cause) {
+      record.runtime.config.onError({
+        message: 'RenderLab: failed to finalize a render record',
+        cause,
+      });
+    }
   }
 }
 

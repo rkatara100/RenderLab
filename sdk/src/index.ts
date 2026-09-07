@@ -20,4 +20,4 @@ export type {
   TelemetryEvent,
 } from '@renderlab/shared-types';
 
-export const SDK_VERSION = '0.0.0';
+export { SDK_VERSION } from './version.js';

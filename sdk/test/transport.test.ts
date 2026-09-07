@@ -45,4 +45,37 @@ describe('sendBatch', () => {
       sendBatch([], session, { endpoint: 'http://api.test', apiKey: 'key', mode: 'beacon' }),
     ).rejects.toThrow(/sendBeacon/);
   });
+
+  it('sends the sdk version and the consumer-supplied app version, never key material', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 202 });
+    vi.stubGlobal('fetch', fetchSpy);
+    await sendBatch([], session, {
+      endpoint: 'http://api.test',
+      apiKey: 'super-secret-ingest-key',
+      mode: 'fetch',
+      appVersion: '2.3.1',
+    });
+    const [, options] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(options.body as string) as {
+      sdk_version: string;
+      session: { app_version: string };
+    };
+    expect(body.sdk_version).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(body.session.app_version).toBe('2.3.1');
+    expect(JSON.stringify(body)).not.toContain('super-secret-ingest-key');
+  });
+
+  it('generates a fresh batch_id per call', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 202 });
+    vi.stubGlobal('fetch', fetchSpy);
+    await sendBatch([], session, { endpoint: 'http://api.test', apiKey: 'key', mode: 'fetch' });
+    await sendBatch([], session, { endpoint: 'http://api.test', apiKey: 'key', mode: 'fetch' });
+    const first = JSON.parse((fetchSpy.mock.calls[0] as [string, RequestInit])[1].body as string) as {
+      batch_id: string;
+    };
+    const second = JSON.parse((fetchSpy.mock.calls[1] as [string, RequestInit])[1].body as string) as {
+      batch_id: string;
+    };
+    expect(first.batch_id).not.toBe(second.batch_id);
+  });
 });

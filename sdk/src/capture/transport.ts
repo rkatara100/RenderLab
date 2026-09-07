@@ -1,9 +1,12 @@
 import type { TelemetryEvent } from '@renderlab/shared-types';
+import { createId } from './ids.js';
+import { SDK_VERSION } from '../version.js';
 
 export interface TransportOptions {
   endpoint: string;
   apiKey: string;
   mode: 'fetch' | 'beacon';
+  appVersion?: string | undefined;
 }
 
 export interface SessionRef {
@@ -17,10 +20,12 @@ export async function sendBatch(
   options: TransportOptions,
 ): Promise<void> {
   const body = JSON.stringify({
-    batch_id: crypto.randomUUID(),
+    batch_id: createId(),
+    sdk_version: SDK_VERSION,
     session: {
       sdk_session_key: session.sessionId,
       started_at: new Date(session.startedAt).toISOString(),
+      app_version: options.appVersion,
     },
     events,
   });

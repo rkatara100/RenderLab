@@ -1,6 +1,7 @@
 import type { LongTaskEvent } from '@renderlab/shared-types';
 import type { RenderLabRuntime } from '../capture/runtime.js';
 import { toWallClockMs } from './clock.js';
+import { createId } from '../capture/ids.js';
 
 interface LongTaskPerformanceEntry extends PerformanceEntry {
   attribution?: Array<{ name?: string }>;
@@ -15,7 +16,7 @@ export function startLongTaskObserver(runtime: RenderLabRuntime): () => void {
       for (const entry of list.getEntries() as LongTaskPerformanceEntry[]) {
         const event: LongTaskEvent = {
           type: 'long-task',
-          eventId: crypto.randomUUID(),
+          eventId: createId(),
           sessionId: runtime.sessionId,
           appId: runtime.appId,
           timestamp: toWallClockMs(entry.startTime),

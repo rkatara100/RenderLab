@@ -1,4 +1,6 @@
-import { Profiler, useState, type JSX, type ReactNode } from 'react';
+'use client';
+
+import { Profiler, useEffect, useState, type JSX, type ReactNode } from 'react';
 import type { RenderLabConfig } from '@renderlab/shared-types';
 import { createRuntime, getGlobalRuntime, type RenderLabRuntime } from '../capture/runtime.js';
 import { useRenderCapture } from '../instrumentation/useRenderCapture.js';
@@ -25,6 +27,16 @@ export function RenderLabProvider({ config, children }: RenderLabProviderProps):
     if (config) return createRuntime(config);
     return getGlobalRuntime();
   });
+
+  useEffect(() => {
+    if (!runtime) {
+      console.warn(
+        '[RenderLab] RenderLabProvider rendered without a runtime. ' +
+          'Call init({ apiKey }) before this provider mounts, or pass a config prop directly. ' +
+          'No telemetry will be captured until this is fixed.',
+      );
+    }
+  }, [runtime]);
 
   if (!runtime) {
     return <>{children}</>;

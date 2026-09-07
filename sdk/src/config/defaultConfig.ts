@@ -1,7 +1,10 @@
 import type { PropCaptureMode, RenderLabConfig, RenderLabSDKError } from '@renderlab/shared-types';
+import { resolveAppId } from '../capture/ids.js';
 
 export interface ResolvedConfig {
   apiKey: string;
+  appId: string;
+  appVersion: string | undefined;
   environment: string;
   endpoint: string;
   sampleRate: number;
@@ -28,6 +31,8 @@ export function resolveConfig(config: RenderLabConfig): ResolvedConfig {
 
   return {
     apiKey: config.apiKey,
+    appId: resolveAppId(config.appId),
+    appVersion: config.appVersion,
     environment: config.environment ?? 'production',
     endpoint: config.endpoint ?? DEFAULT_ENDPOINT,
     sampleRate: config.sampleRate ?? (isDev ? 1 : 0.1),
@@ -55,7 +60,11 @@ export function resolveConfig(config: RenderLabConfig): ResolvedConfig {
       ignoreUrls: config.network?.ignoreUrls ?? [],
     },
     transport: config.transport ?? 'fetch',
-    onError: config.onError ?? (() => {}),
+    onError:
+      config.onError ??
+      ((error) => {
+        console.warn(`[RenderLab] ${error.message}`, error.cause);
+      }),
     enabled: config.enabled ?? true,
   };
 }
