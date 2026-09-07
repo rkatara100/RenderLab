@@ -1,6 +1,6 @@
 'use client';
 
-import { useContext, useMemo, useRef } from 'react';
+import { useContext, useEffect, useMemo, useRef } from 'react';
 import type { ProfilerOnRenderCallback } from 'react';
 import type {
   ContextDiffEntry,
@@ -144,6 +144,53 @@ export function useRenderCapture(
   const phase: RenderPhase = prevPropsRef.current === null ? 'mount' : 'update';
   prevPropsRef.current = props;
   const registry = registryRef.current;
+
+  const runtimeRef = useRef(runtime);
+  runtimeRef.current = runtime;
+  const componentNameRef = useRef(componentName);
+  componentNameRef.current = componentName;
+  const componentPathRef = useRef(componentPath);
+  componentPathRef.current = componentPath;
+  const isMemoizedRef = useRef(isMemoized);
+  isMemoizedRef.current = isMemoized;
+
+  useEffect(() => {
+    return () => {
+      const unmountRuntime = runtimeRef.current;
+      if (!unmountRuntime || !unmountRuntime.config.enabled) return;
+      if (isIgnored(componentNameRef.current, unmountRuntime.config.ignore.componentNames)) return;
+
+      try {
+        const event: RenderEvent = {
+          type: 'render',
+          eventId: createId(),
+          sessionId: unmountRuntime.sessionId,
+          appId: unmountRuntime.appId,
+          timestamp: Date.now(),
+          sequence: unmountRuntime.nextSequence(),
+          componentId,
+          componentName: componentNameRef.current,
+          componentPath: componentPathRef.current,
+          phase: 'unmount',
+          renderReason: 'unknown',
+          propsDiff: [],
+          actualDuration: 0,
+          baseDuration: 0,
+          startTime: 0,
+          commitTime: Date.now(),
+          isMemoized: isMemoizedRef.current,
+          // eslint-disable-next-line react-hooks/exhaustive-deps
+          renderCount: renderCountRef.current,
+        };
+        unmountRuntime.queue.enqueue(event);
+      } catch (cause) {
+        unmountRuntime.config.onError({
+          message: 'RenderLab: failed to emit unmount event',
+          cause,
+        });
+      }
+    };
+  }, [componentId]);
 
   const finalize = (timing: RenderTiming, commitKey?: number): void => {
     if (!runtime || !runtime.config.enabled) return;
